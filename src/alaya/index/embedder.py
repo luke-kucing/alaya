@@ -1,11 +1,14 @@
 """Embedder: chunk notes by section, embed with nomic-embed-text-v1.5 (ONNX)."""
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 _model = None  # lazy-loaded singleton
@@ -14,8 +17,10 @@ _model = None  # lazy-loaded singleton
 def _get_model():
     global _model
     if _model is None:
+        logger.info("Loading embedding model: %s", _MODEL_NAME)
         from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer(_MODEL_NAME, backend="onnx", trust_remote_code=True)
+        logger.info("Embedding model loaded")
     return _model
 
 

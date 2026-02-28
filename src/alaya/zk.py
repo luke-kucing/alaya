@@ -1,5 +1,8 @@
+import logging
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class ZKError(Exception):
@@ -9,6 +12,7 @@ class ZKError(Exception):
 def run_zk(args: list[str], vault_root: Path, timeout: int = 30) -> str:
     """Run a zk CLI command and return stdout. Raises ZKError on failure."""
     cmd = ["zk"] + args
+    logger.debug("Running: %s", " ".join(cmd))
     result = subprocess.run(
         cmd,
         cwd=str(vault_root),
@@ -17,5 +21,7 @@ def run_zk(args: list[str], vault_root: Path, timeout: int = 30) -> str:
         timeout=timeout,
     )
     if result.returncode != 0:
-        raise ZKError(result.stderr.strip() or f"zk exited with code {result.returncode}")
+        msg = result.stderr.strip() or f"zk exited with code {result.returncode}"
+        logger.warning("zk command failed: %s", msg)
+        raise ZKError(msg)
     return result.stdout.strip()

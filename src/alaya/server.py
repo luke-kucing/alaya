@@ -1,6 +1,11 @@
+import logging
+
 from fastmcp import FastMCP
 
 from alaya.config import get_vault_root, ConfigError
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     name="alaya",
@@ -27,12 +32,25 @@ import alaya.tools.ingest    # noqa: F401, E402
 def main() -> None:
     try:
         vault_root = get_vault_root()
-        print(f"alaya: vault root = {vault_root}")
     except ConfigError as e:
-        print(f"alaya: configuration error — {e}")
+        logger.error("Configuration error: %s", e)
         raise SystemExit(1)
 
-    mcp.run()
+    logger.info("alaya starting — vault root: %s", vault_root)
+
+    from alaya.index.store import get_store
+    from alaya.watcher import start_watcher
+
+    store = get_store(vault_root)
+    observer = start_watcher(vault_root, store)
+    logger.info("File watcher started")
+
+    try:
+        mcp.run()
+    finally:
+        observer.stop()
+        observer.join()
+        logger.info("File watcher stopped")
 
 
 if __name__ == "__main__":
