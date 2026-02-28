@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alaya.tools.read import get_note, list_notes, get_backlinks, get_links, get_tags
+from alaya.tools.read import get_note, get_note_by_title, list_notes, get_backlinks, get_links, get_tags
 
 
 ZK_LIST_OUTPUT = """\
@@ -52,6 +52,46 @@ class TestGetNote:
         with pytest.raises(ValueError):
             get_note("../../etc/passwd", vault)
 
+    # --- structured return (R-RD-02) ---
+
+    def test_structured_return_has_metadata_header(self, vault: Path) -> None:
+        result = get_note("projects/second-brain.md", vault)
+        assert "**Title:**" in result
+        assert "**Date:**" in result
+        assert "**Path:**" in result
+
+    def test_structured_return_has_content_separator(self, vault: Path) -> None:
+        result = get_note("projects/second-brain.md", vault)
+        assert "---" in result
+        assert "FastMCP" in result  # body content follows separator
+
+    def test_structured_return_includes_tags_when_present(self, vault: Path) -> None:
+        result = get_note("projects/second-brain.md", vault)
+        assert "**Tags:**" in result
+
+    # --- title-based lookup (R-RD-01) ---
+
+    def test_title_lookup_finds_note(self, vault: Path) -> None:
+        result = get_note_by_title("second-brain", vault)
+        assert "FastMCP" in result
+
+    def test_title_lookup_case_insensitive(self, vault: Path) -> None:
+        result = get_note_by_title("SECOND-BRAIN", vault)
+        assert "FastMCP" in result
+
+    def test_title_lookup_missing_raises(self, vault: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            get_note_by_title("this-note-does-not-exist", vault)
+
+    def test_title_lookup_ambiguous_raises(self, vault: Path) -> None:
+        """Two notes in the vault fixture share the 'platform' title fragment — use exact match."""
+        # Create a second note with the same title to force ambiguity
+        (vault / "ideas" / "second-brain-copy.md").write_text(
+            "---\ntitle: second-brain\ndate: 2026-02-01\n---\nDuplicate.\n"
+        )
+        with pytest.raises(ValueError, match="[Aa]mbiguous"):
+            get_note_by_title("second-brain", vault)
+
 
 class TestListNotes:
     def test_returns_markdown_table(self, vault: Path) -> None:
@@ -77,6 +117,43 @@ class TestListNotes:
             result = list_notes(vault)
         assert "no notes" in result.lower()
 
+    # --- since / until / recent / sort (R-RD-03, R-SQ-02, R-SQ-04) ---
+
+    def test_since_passes_modified_after_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, since="2026-01-01")
+        args = mock_zk.call_args[0][0]
+        assert "--modified-after" in args
+        assert "2026-01-01" in args
+
+    def test_until_passes_modified_before_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, until="2026-02-28")
+        args = mock_zk.call_args[0][0]
+        assert "--modified-before" in args
+        assert "2026-02-28" in args
+
+    def test_recent_converts_to_modified_after(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, recent=7)
+        args = mock_zk.call_args[0][0]
+        assert "--modified-after" in args
+        idx = args.index("--modified-after")
+        from datetime import date, timedelta
+        cutoff = date.today() - timedelta(days=7)
+        assert args[idx + 1] == cutoff.isoformat()
+
+    def test_sort_passes_sort_flag_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, sort="modified")
+        args = mock_zk.call_args[0][0]
+        assert "--sort" in args
+        assert "modified" in args
+
+    def test_recent_and_since_conflict_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="[Cc]onflict|not both|exclusive"):
+            list_notes(vault, since="2026-01-01", recent=7)
+
 
 class TestGetBacklinks:
     def test_returns_backlinks(self, vault: Path) -> None:
@@ -89,6 +166,14 @@ class TestGetBacklinks:
         with patch("alaya.tools.read.run_zk", return_value=""):
             result = get_backlinks("ideas/voice-capture.md", vault)
         assert "no backlinks" in result.lower()
+
+    def test_uses_link_to_flag(self, vault: Path) -> None:
+        # --link-to PATH finds notes linking TO PATH (i.e. backlinks)
+        with patch("alaya.tools.read.run_zk", return_value=ZK_BACKLINKS_OUTPUT.strip()) as mock_zk:
+            get_backlinks("projects/second-brain.md", vault)
+        args = mock_zk.call_args[0][0]
+        assert "--link-to" in args
+        assert "--linked-by" not in args
 
     def test_path_traversal_rejected(self, vault: Path) -> None:
         with pytest.raises(ValueError):
@@ -106,6 +191,14 @@ class TestGetLinks:
         with patch("alaya.tools.read.run_zk", return_value=""):
             result = get_links("ideas/voice-capture.md", vault)
         assert "no links" in result.lower()
+
+    def test_uses_linked_by_flag(self, vault: Path) -> None:
+        # --linked-by PATH finds notes linked by PATH (i.e. forward/outgoing links)
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LINKS_OUTPUT.strip()) as mock_zk:
+            get_links("projects/second-brain.md", vault)
+        args = mock_zk.call_args[0][0]
+        assert "--linked-by" in args
+        assert "--link-to" not in args
 
 
 class TestGetTags:

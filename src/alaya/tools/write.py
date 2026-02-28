@@ -2,9 +2,11 @@
 import re
 from datetime import date
 from pathlib import Path
+from alaya.errors import SECTION_NOT_FOUND
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
+from alaya.errors import error, NOT_FOUND, ALREADY_EXISTS, OUTSIDE_VAULT, INVALID_ARGUMENT
+from alaya.events import emit, NoteEvent
 from alaya.vault import resolve_note_path
 
 # Directories considered valid targets for note creation
@@ -64,20 +66,63 @@ def create_note(
     if body:
         content_parts.append(body)
 
+    if file_path.exists():
+        raise FileExistsError(f"Note already exists: {file_path.relative_to(vault)}")
+
     file_path.write_text("\n".join(content_parts) + "\n")
+    relative = str(file_path.relative_to(vault))
+    emit(NoteEvent("created", relative))
+    return relative
 
-    return str(file_path.relative_to(vault))
 
+def append_to_note(
+    relative_path: str,
+    text: str,
+    vault: Path,
+    section_header: str | None = None,
+    dated: bool = False,
+) -> None:
+    """Append text to an existing note.
 
-def append_to_note(relative_path: str, text: str, vault: Path) -> None:
-    """Append text to an existing note."""
+    section_header: append under the named '## Header' section instead of EOF.
+    dated: prepend a '### YYYY-MM-DD' heading to the appended text.
+    """
     path = resolve_note_path(relative_path, vault)
     if not path.exists():
         raise FileNotFoundError(f"Note not found: {relative_path}")
 
+    if dated:
+        text = f"### {date.today().isoformat()}\n{text}"
+
     existing = path.read_text()
-    separator = "\n" if existing.endswith("\n") else "\n\n"
-    path.write_text(existing + separator + text + "\n")
+
+    if section_header is None:
+        separator = "\n" if existing.endswith("\n") else "\n\n"
+        path.write_text(existing + separator + text + "\n")
+        emit(NoteEvent("modified", relative_path))
+        return
+
+    # Insert under the named section, before the next ## heading or EOF
+    lines = existing.splitlines(keepends=True)
+    target = f"## {section_header}"
+    section_idx = next(
+        (i for i, l in enumerate(lines) if l.rstrip() == target),
+        None,
+    )
+    if section_idx is None:
+        raise ValueError(f"Section not found: '{section_header}'")
+
+    # find insertion point: end of this section (before the next ## or EOF)
+    insert_at = len(lines)
+    for i in range(section_idx + 1, len(lines)):
+        if lines[i].startswith("## "):
+            insert_at = i
+            break
+
+    # inject a blank line + text before the insertion point
+    new_lines = lines[:insert_at] + ["\n", text + "\n"] + lines[insert_at:]
+    path.write_text("".join(new_lines))
+    emit(NoteEvent("modified", relative_path))
 
 
 def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Path) -> None:
@@ -139,33 +184,55 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
         lines.insert(insert_at, new_tag_line)
 
     path.write_text("\n".join(lines) + "\n")
+    emit(NoteEvent("modified", relative_path))
 
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def create_note_tool(title: str, directory: str, tags: list[str], body: str = "") -> str:
         """Create a new note. Returns the relative path of the created file."""
-        return create_note(title, directory, tags, body, vault_root())
+        try:
+            return create_note(title, directory, tags, body, vault)
+        except FileExistsError as e:
+            return error(ALREADY_EXISTS, str(e))
+        except ValueError as e:
+            return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
-    def append_to_note_tool(path: str, text: str) -> str:
-        """Append text to an existing note."""
-        append_to_note(path, text, vault_root())
-        return f"Appended to `{path}`."
+    def append_to_note_tool(
+        path: str,
+        text: str,
+        section_header: str = "",
+        dated: bool = False,
+    ) -> str:
+        """Append text to an existing note. Optionally target a section and/or prepend a date heading."""
+        try:
+            append_to_note(
+                path, text, vault,
+                section_header=section_header or None,
+                dated=dated,
+            )
+            return f"Appended to `{path}`."
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            # section not found vs path traversal — both map to appropriate error codes
+            msg = str(e)
+            if "Section" in msg or "section" in msg:
+                from alaya.errors import error as _err
+                return _err(SECTION_NOT_FOUND, msg)
+            return error(OUTSIDE_VAULT, msg)
 
     @mcp.tool()
     def update_tags_tool(path: str, add: list[str], remove: list[str]) -> str:
         """Add or remove tags on an existing note."""
-        update_tags(path, add, remove, vault_root())
-        return f"Tags updated on `{path}`."
+        try:
+            update_tags(path, add, remove, vault)
+            return f"Tags updated on `{path}`."
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

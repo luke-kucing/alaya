@@ -1,0 +1,3 @@
+$6103038c-4506-4925-84a1-110e7f83a02e²üpath ÿÿÿÿÿÿÿÿÿ*string08 title ÿÿÿÿÿÿÿÿÿ*string08$	directory ÿÿÿÿÿÿÿÿÿ*string08tags ÿÿÿÿÿÿÿÿÿ*string08(modified_date ÿÿÿÿÿÿÿÿÿ*string08%chunk_index ÿÿÿÿÿÿÿÿÿ*int3208text ÿÿÿÿÿÿÿÿÿ*string084vector ÿÿÿÿÿÿÿÿÿ*fixed_size_list:float:76808"!
+lance.auto_cleanup.interval20"'
+lance.auto_cleanup.older_than14days

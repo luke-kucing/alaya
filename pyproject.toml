@@ -7,11 +7,11 @@ requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=3.0.2",
     "lancedb>=0.29,<0.31",
-    "sentence-transformers[onnx]>=5.2",
     "pymupdf4llm>=0.0.17",
     "trafilatura>=2.0",
     "httpx>=0.28",
     "watchdog>=6.0",
+    "fastembed>=0.7.4",
 ]
 
 [dependency-groups]

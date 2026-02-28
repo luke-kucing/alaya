@@ -68,3 +68,16 @@ class TestClearInboxItem:
     def test_no_match_raises(self, vault: Path) -> None:
         with pytest.raises(ValueError, match="not found"):
             clear_inbox_item("this item does not exist", vault)
+
+    def test_partial_word_does_not_match_different_item(self, vault: Path) -> None:
+        # "alex" is a substring of "alex mentioned..." — but should not match
+        # a hypothetical item containing "complex" (which contains "alex" as substring).
+        # Add an item whose text contains "alex" in a different context.
+        inbox = vault / "inbox.md"
+        inbox.write_text(inbox.read_text() + "- 2026-02-28 10:00 complex infrastructure refactor\n")
+
+        # Clearing by "alex" should only remove the "alex mentioned..." item, not "complex"
+        clear_inbox_item("alex mentioned wanting more ownership on infrastructure work", vault)
+        content = inbox.read_text()
+        assert "complex infrastructure refactor" in content
+        assert "alex mentioned wanting more ownership" not in content

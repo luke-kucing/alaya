@@ -2,8 +2,8 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
-from alaya.vault import resolve_note_path
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
+from alaya.vault import resolve_note_path, parse_note
 from alaya.zk import run_zk, ZKError
 
 
@@ -29,12 +29,57 @@ def reindex_vault(vault: Path, confirm: bool = False) -> str:
         return f"Reindex failed: {e}"
 
 
+def _format_note(relative_path: str, content: str) -> str:
+    """Format a note with a structured metadata header above the body."""
+    note = parse_note(content)
+    title = note.title or Path(relative_path).stem
+    tags_raw = " ".join(f"#{t}" for t in note.tags)
+
+    lines = [f"**Title:** {title}", f"**Date:** {note.date}"]
+    if tags_raw:
+        lines.append(f"**Tags:** {tags_raw}")
+    lines.append(f"**Path:** {relative_path}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append(note.body.strip())
+    return "\n".join(lines)
+
+
 def get_note(relative_path: str, vault: Path) -> str:
-    """Return the full content of a note by relative path."""
+    """Return a note's content with a structured metadata header."""
     path = resolve_note_path(relative_path, vault)
     if not path.exists():
         raise FileNotFoundError(f"Note not found: {relative_path}")
-    return path.read_text()
+    return _format_note(relative_path, path.read_text())
+
+
+def get_note_by_title(title: str, vault: Path) -> str:
+    """Find a note by its frontmatter title and return formatted content.
+
+    Raises FileNotFoundError if no match, ValueError if multiple matches.
+    """
+    title_lower = title.lower()
+    matches = []
+    for md_file in vault.rglob("*.md"):
+        try:
+            content = md_file.read_text()
+        except OSError:
+            continue
+        note = parse_note(content)
+        note_title = note.title or md_file.stem
+        if note_title.lower() == title_lower:
+            matches.append((md_file, content))
+
+    if not matches:
+        raise FileNotFoundError(f"No note found with title: {title!r}")
+    if len(matches) > 1:
+        paths = ", ".join(str(f.relative_to(vault)) for f, _ in matches)
+        raise ValueError(f"Ambiguous title {title!r} — matches: {paths}")
+
+    md_file, content = matches[0]
+    relative_path = str(md_file.relative_to(vault))
+    return _format_note(relative_path, content)
 
 
 def list_notes(
@@ -42,11 +87,35 @@ def list_notes(
     directory: str | None = None,
     tag: str | None = None,
     limit: int = 50,
+    since: str | None = None,
+    until: str | None = None,
+    recent: int | None = None,
+    sort: str | None = None,
 ) -> str:
-    """Return a Markdown table of notes, optionally filtered by directory or tag."""
-    args = ["list", "--format", "{{path}}\t{{title}}\t{{date}}\t{{tags}}", "--limit", str(limit)]
+    """Return a Markdown table of notes, optionally filtered/sorted.
+
+    since/until: ISO date strings for modification date range.
+    recent: shorthand for notes modified in the last N days.
+    sort: one of 'modified', 'created', 'title'.
+    """
+    from datetime import date, timedelta
+
+    if since and recent is not None:
+        raise ValueError("since and recent are exclusive — use one or the other, not both")
+
+    args = ["list", "--format", "{{path}}\t{{title}}\t{{format-date created '%Y-%m-%d'}}\t{{tags}}", "--limit", str(limit)]
+
     if tag:
         args += ["--tag", tag]
+    if since:
+        args += ["--modified-after", since]
+    if recent is not None:
+        cutoff = (date.today() - timedelta(days=recent)).isoformat()
+        args += ["--modified-after", cutoff]
+    if until:
+        args += ["--modified-before", until]
+    if sort:
+        args += ["--sort", sort]
     if directory:
         args.append(directory)
 
@@ -59,9 +128,9 @@ def list_notes(
         parts = line.split("\t")
         path = parts[0] if len(parts) > 0 else ""
         title = parts[1] if len(parts) > 1 else ""
-        date = parts[2] if len(parts) > 2 else ""
+        date_str = parts[2] if len(parts) > 2 else ""
         tags = parts[3] if len(parts) > 3 else ""
-        rows.append(f"| [[{title}]] | `{path}` | {date} | {tags} |")
+        rows.append(f"| [[{title}]] | `{path}` | {date_str} | {tags} |")
 
     header = "| Title | Path | Date | Tags |\n|---|---|---|---|"
     return header + "\n" + "\n".join(rows)
@@ -128,47 +197,65 @@ def get_tags(vault: Path) -> str:
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
+def _register(mcp: FastMCP, vault: Path) -> None:
+    @mcp.tool()
+    def get_note_tool(path: str = "", title: str = "") -> str:
+        """Read a note. Provide exactly one of path (relative path) or title (frontmatter title)."""
+        if path and title:
+            return error(INVALID_ARGUMENT, "Provide path or title, not both.")
+        if not path and not title:
+            return error(INVALID_ARGUMENT, "Either path or title is required.")
+        try:
+            if title:
+                return get_note_by_title(title, vault)
+            return get_note(path, vault)
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
-    def get_note_tool(path: str) -> str:
-        """Read the full content of a note by its relative path (e.g. 'projects/second-brain.md')."""
-        return get_note(path, vault_root())
-
-    @mcp.tool()
-    def list_notes_tool(directory: str = "", tag: str = "", limit: int = 50) -> str:
-        """List notes in the vault, optionally filtered by directory or tag."""
-        return list_notes(
-            vault_root(),
-            directory=directory or None,
-            tag=tag or None,
-            limit=limit,
-        )
+    def list_notes_tool(
+        directory: str = "",
+        tag: str = "",
+        limit: int = 50,
+        since: str = "",
+        until: str = "",
+        recent: int = 0,
+        sort: str = "",
+    ) -> str:
+        """List notes. Filter by directory, tag, date range (since/until) or recent N days. Sort by modified/created/title."""
+        try:
+            return list_notes(
+                vault,
+                directory=directory or None,
+                tag=tag or None,
+                limit=limit,
+                since=since or None,
+                until=until or None,
+                recent=recent or None,
+                sort=sort or None,
+            )
+        except ValueError as e:
+            return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
     def get_backlinks_tool(path: str) -> str:
         """Return all notes that link to the given note (backlinks)."""
-        return get_backlinks(path, vault_root())
+        return get_backlinks(path, vault)
 
     @mcp.tool()
     def get_links_tool(path: str) -> str:
         """Return all notes that the given note links to (outgoing links)."""
-        return get_links(path, vault_root())
+        return get_links(path, vault)
 
     @mcp.tool()
     def get_tags_tool() -> str:
         """Return all tags in the vault with note counts."""
-        return get_tags(vault_root())
+        return get_tags(vault)
 
     @mcp.tool()
     def reindex_vault_tool(confirm: bool = False) -> str:
         """Rebuild the full LanceDB vector index. Requires confirm=True."""
-        return reindex_vault(vault_root(), confirm=confirm)
+        return reindex_vault(vault, confirm=confirm)
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

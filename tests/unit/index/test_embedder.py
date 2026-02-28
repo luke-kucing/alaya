@@ -53,14 +53,20 @@ class TestChunkNote:
 
 
 class TestEmbedChunks:
+    def _mock_get_model(self, n: int):
+        """Return a (mock_model, mock_cfg) tuple matching the get_model() API."""
+        from alaya.index.models import MODELS, DEFAULT_MODEL_KEY
+        mock_model = MagicMock()
+        vecs = np.random.rand(n, 768).astype(np.float64)
+        mock_model.embed.return_value = iter(vecs)
+        cfg = MODELS[DEFAULT_MODEL_KEY]
+        return (mock_model, cfg)
+
     def test_returns_array_per_chunk(self, vault: Path) -> None:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)
 
-        mock_model = MagicMock()
-        mock_model.encode.return_value = np.random.rand(len(chunks), 768).astype(np.float32)
-
-        with patch("alaya.index.embedder._get_model", return_value=mock_model):
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(len(chunks))):
             embeddings = embed_chunks(chunks)
 
         assert len(embeddings) == len(chunks)
@@ -70,10 +76,26 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)[:2]
 
-        mock_model = MagicMock()
-        mock_model.encode.return_value = np.random.rand(2, 768).astype(np.float32)
-
-        with patch("alaya.index.embedder._get_model", return_value=mock_model):
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(2)):
             embeddings = embed_chunks(chunks)
 
         assert embeddings[0].shape == (768,)
+
+    def test_embeddings_are_float32(self, vault: Path) -> None:
+        content = (vault / "projects/second-brain.md").read_text()
+        chunks = chunk_note("projects/second-brain.md", content)[:1]
+
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(1)):
+            embeddings = embed_chunks(chunks)
+
+        assert embeddings[0].dtype == np.float32
+
+    def test_embeddings_are_normalized(self, vault: Path) -> None:
+        content = (vault / "projects/second-brain.md").read_text()
+        chunks = chunk_note("projects/second-brain.md", content)[:1]
+
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(1)):
+            embeddings = embed_chunks(chunks)
+
+        norm = np.linalg.norm(embeddings[0])
+        assert abs(norm - 1.0) < 1e-5

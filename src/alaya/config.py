@@ -22,10 +22,3 @@ def get_vault_root() -> Path:
     return path
 
 
-def get_gitlab_project() -> str | None:
-    return os.environ.get("GITLAB_PROJECT")
-
-
-def get_gitlab_default_labels() -> list[str]:
-    raw = os.environ.get("GITLAB_DEFAULT_LABELS", "")
-    return [l.strip() for l in raw.split(",") if l.strip()]

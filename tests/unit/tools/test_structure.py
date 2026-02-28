@@ -25,18 +25,18 @@ class TestMoveNote:
         with pytest.raises(ValueError):
             move_note("ideas/voice-capture.md", "../../etc", vault)
 
-    def test_wikilinks_updated_in_referencing_notes(self, vault: Path) -> None:
-        # voice-capture.md is linked from ideas/ — second-brain links to [[second-brain]]
-        # we add a wikilink to a note we control and verify it updates
+    def test_wikilinks_unchanged_after_move(self, vault: Path) -> None:
+        # zk uses title-based wikilinks ([[title]]). Moving a file changes its
+        # directory but not its title, so existing wikilinks remain valid.
         note = vault / "projects/second-brain.md"
-        original = note.read_text()
-        note.write_text(original + "\n- [[voice-capture]]\n")
+        note.write_text(note.read_text() + "\n- [[voice-capture]]\n")
 
         move_note("ideas/voice-capture.md", "resources", vault)
 
-        content = note.read_text()
-        # wikilink title stays the same (title doesn't change on move)
-        assert "[[voice-capture]]" in content
+        # [[voice-capture]] is still valid — the title hasn't changed
+        assert "[[voice-capture]]" in note.read_text()
+        # the file itself is at the new location
+        assert (vault / "resources/voice-capture.md").exists()
 
     def test_path_traversal_rejected(self, vault: Path) -> None:
         with pytest.raises(ValueError):
@@ -69,6 +69,23 @@ class TestRenameNote:
         assert "[[audio-capture]]" in content
         assert "[[voice-capture]]" not in content
 
+    def test_wikilinks_matched_by_frontmatter_title(self, vault: Path) -> None:
+        # When the frontmatter title differs from the filename stem, wikilinks
+        # use the frontmatter title. Rename must use the frontmatter title for
+        # matching, not src.stem.
+        note_path = vault / "ideas/timestamped-note.md"
+        note_path.write_text(
+            "---\ntitle: My Special Note\ndate: 2026-01-01\n---\nContent.\n"
+        )
+        ref = vault / "projects/second-brain.md"
+        ref.write_text(ref.read_text() + "\n- [[My Special Note]]\n")
+
+        rename_note("ideas/timestamped-note.md", "renamed-note", vault)
+
+        content = ref.read_text()
+        assert "[[renamed-note]]" in content
+        assert "[[My Special Note]]" not in content
+
     def test_source_missing_raises(self, vault: Path) -> None:
         with pytest.raises(FileNotFoundError):
             rename_note("ideas/ghost.md", "something", vault)
@@ -88,10 +105,15 @@ class TestDeleteNote:
         result = delete_note("ideas/voice-capture.md", vault)
         assert result == "archives/voice-capture.md"
 
-    def test_reason_appended_to_note(self, vault: Path) -> None:
+    def test_reason_written_to_frontmatter(self, vault: Path) -> None:
         delete_note("ideas/voice-capture.md", vault, reason="superseded by voice-pipeline project")
         content = (vault / "archives/voice-capture.md").read_text()
-        assert "superseded by voice-pipeline project" in content
+        # reason must be in frontmatter, not appended to body
+        assert "archived_reason: superseded by voice-pipeline project" in content
+        # frontmatter closes before body content
+        fm_end = content.index("---", 4)  # second --- (first is at 0)
+        reason_pos = content.index("archived_reason")
+        assert reason_pos < fm_end
 
     def test_already_archived_raises(self, vault: Path) -> None:
         # first delete

@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, SECTION_NOT_FOUND, ALREADY_EXISTS
 from alaya.vault import resolve_note_path
 from alaya.tools.write import create_note
 
@@ -108,24 +108,34 @@ def extract_section(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def replace_section_tool(path: str, section: str, new_content: str) -> str:
         """Replace the content of a named ## section in a note."""
-        replace_section(path, section, new_content, vault_root())
-        return f"Section '{section}' updated in `{path}`."
+        try:
+            replace_section(path, section, new_content, vault)
+            return f"Section '{section}' updated in `{path}`."
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            msg = str(e)
+            if "SECTION_NOT_FOUND" in msg:
+                return error(SECTION_NOT_FOUND, msg)
+            return error(OUTSIDE_VAULT, msg)
 
     @mcp.tool()
     def extract_section_tool(source: str, section: str, new_title: str, new_directory: str) -> str:
         """Extract a ## section into a new note, leaving a wikilink in the original."""
-        new_path = extract_section(source, section, new_title, new_directory, vault_root())
-        return f"Extracted '{section}' from `{source}` → `{new_path}`."
+        try:
+            new_path = extract_section(source, section, new_title, new_directory, vault)
+            return f"Extracted '{section}' from `{source}` → `{new_path}`."
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except FileExistsError as e:
+            return error(ALREADY_EXISTS, str(e))
+        except ValueError as e:
+            msg = str(e)
+            if "SECTION_NOT_FOUND" in msg:
+                return error(SECTION_NOT_FOUND, msg)
+            return error(OUTSIDE_VAULT, msg)
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

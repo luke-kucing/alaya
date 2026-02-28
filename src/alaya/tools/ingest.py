@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -51,12 +52,12 @@ def _index_content(
     vault: Path,
 ) -> int:
     """Chunk and embed content into LanceDB. Returns number of chunks indexed."""
-    from alaya.index.embedder import chunk_note, embed_chunks, Chunk
+    from alaya.index.embedder import chunk_note, embed_chunks
     from alaya.index.store import get_store, upsert_note
 
     # build a synthetic note-like string for chunking
     tag_line = " ".join(f"#{t}" for t in tags) if tags else ""
-    synthetic = f"---\ntitle: {title}\ndate: 2026-01-01\n---\n"
+    synthetic = f"---\ntitle: {title}\ndate: {date.today().isoformat()}\n---\n"
     if tag_line:
         synthetic += f"{tag_line}\n\n"
     synthetic += text
@@ -75,12 +76,14 @@ def _index_content(
 def _find_suggested_links(text: str, vault: Path, limit: int = 5) -> list[dict]:
     """Find top semantically related existing notes for suggested wikilinks."""
     try:
-        from alaya.index.embedder import _get_model
+        from alaya.index.embedder import get_model
         from alaya.index.store import get_store, hybrid_search
         import numpy as np
 
-        model = _get_model()
-        embedding = model.encode([f"search_query: {text[:512]}"], normalize_embeddings=True)[0]
+        model, cfg = get_model()
+        raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text[:512]}"])))
+        norm = np.linalg.norm(raw[0])
+        embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
         store = get_store(vault)
         return hybrid_search(text[:200], embedding, store, limit=limit)
     except Exception:
@@ -91,7 +94,6 @@ def ingest(
     source: str,
     title: str | None = None,
     tags: list[str] | None = None,
-    depth: int = 0,
     vault: Path | None = None,
 ) -> IngestResult:
     """Ingest a URL, PDF, or markdown file into LanceDB.
@@ -165,23 +167,19 @@ def ingest(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def ingest_tool(
         source: str,
         title: str = "",
-        tags: list[str] = [],
-        depth: int = 0,
+        tags: list[str] | None = None,
     ) -> str:
         """Ingest a URL, PDF, or markdown file. Returns raw_text, title, chunks indexed, and suggested wikilinks."""
         result = ingest(
             source,
             title=title or None,
-            tags=tags,
-            depth=depth,
-            vault=vault_root(),
+            tags=tags or [],
+            vault=vault,
         )
         links = "\n".join(f"- [[{r['title']}]]" for r in result.suggested_links[:5])
         links_section = f"\n\n**Suggested links:**\n{links}" if links else ""
@@ -193,9 +191,3 @@ def _register(mcp: FastMCP) -> None:
             f"{links_section}"
         )
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

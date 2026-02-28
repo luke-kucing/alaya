@@ -1,10 +1,7 @@
 """Search tools: search_notes (M1: zk keyword fallback; M3: LanceDB hybrid)."""
 from pathlib import Path
 
-import numpy as np
-
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
 from alaya.zk import run_zk, ZKError
 
 
@@ -22,25 +19,29 @@ def _run_hybrid_search(
     query: str,
     vault: Path,
     directory: str | None = None,
+    tags: list[str] | None = None,
     limit: int = 20,
 ) -> list[dict]:
     """Embed the query and run hybrid search against LanceDB."""
-    from alaya.index.embedder import _get_model
+    from alaya.index.embedder import get_model
     from alaya.index.store import get_store, hybrid_search
 
-    model = _get_model()
-    query_embedding = model.encode(
-        [f"search_query: {query}"], normalize_embeddings=True
-    )[0]
+    import numpy as np
+    model, cfg = get_model()
+    raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{query}"])))
+    norm = np.linalg.norm(raw[0])
+    query_embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
 
     store = get_store(vault)
-    return hybrid_search(query, query_embedding, store, directory=directory, limit=limit)
+    return hybrid_search(query, query_embedding, store, directory=directory, tags=tags, limit=limit)
 
 
 def search_notes(
     query: str,
     vault: Path,
     directory: str | None = None,
+    tags: list[str] | None = None,
+    since: str | None = None,
     limit: int = 20,
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
@@ -49,7 +50,7 @@ def search_notes(
     zk keyword search otherwise.
     """
     if _hybrid_search_available(vault):
-        results = _run_hybrid_search(query, vault, directory=directory, limit=limit)
+        results = _run_hybrid_search(query, vault, directory=directory, tags=tags, limit=limit)
         if not results:
             return "No notes matching that query."
         rows = [
@@ -63,11 +64,16 @@ def search_notes(
     args = [
         "list",
         "--match", query,
-        "--format", "{{path}}\t{{title}}\t{{date}}",
+        "--format", "{{path}}\t{{title}}\t{{format-date created '%Y-%m-%d'}}",
         "--limit", str(limit),
     ]
     if directory:
         args.append(directory)
+    if tags:
+        for tag in tags:
+            args += ["--tag", tag]
+    if since:
+        args += ["--modified-after", since]
 
     try:
         raw = run_zk(args, vault)
@@ -91,17 +97,22 @@ def search_notes(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
-    def search_notes_tool(query: str, directory: str = "", limit: int = 20) -> str:
-        """Search notes by keyword or semantic query. Optionally restrict to a directory."""
-        return search_notes(query, vault_root(), directory=directory or None, limit=limit)
+    def search_notes_tool(
+        query: str,
+        directory: str = "",
+        tags: list[str] | None = None,
+        since: str = "",
+        limit: int = 20,
+    ) -> str:
+        """Search notes by keyword or semantic query. Filter by directory, tags, or since date."""
+        return search_notes(
+            query,
+            vault,
+            directory=directory or None,
+            tags=tags or None,
+            since=since or None,
+            limit=limit,
+        )
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

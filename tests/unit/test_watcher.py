@@ -90,3 +90,87 @@ class TestVaultEventHandler:
         with patch("alaya.watcher.upsert_note") as mock_upsert:
             handler.on_created(event)
             mock_upsert.assert_not_called()
+
+    def test_upsert_error_is_logged_not_raised(self, vault: Path) -> None:
+        handler = self._make_handler(vault)
+        src_path = str(vault / "projects/second-brain.md")
+
+        with patch("alaya.watcher.chunk_note", side_effect=RuntimeError("embed failed")), \
+             patch("alaya.watcher.logger") as mock_log:
+            # Must not raise — watcher must stay alive
+            handler._do_upsert(src_path)
+            mock_log.warning.assert_called_once()
+
+    def test_ingest_error_is_logged_not_raised(self, vault: Path) -> None:
+        handler = self._make_handler(vault)
+        src_path = str(vault / "raw/broken.pdf")
+        (vault / "raw").mkdir(exist_ok=True)
+        (vault / "raw/broken.pdf").write_bytes(b"bad")
+
+        with patch("alaya.watcher.ingest", side_effect=RuntimeError("parse failed")), \
+             patch("alaya.watcher.logger") as mock_log:
+            handler._trigger_ingest(src_path)
+            import time; time.sleep(0.1)
+            mock_log.warning.assert_called_once()
+
+
+class TestDebounce:
+    """Tests for debounce logic — uses a very short interval to keep tests fast."""
+
+    def _make_handler(self, vault: Path) -> "VaultEventHandler":
+        mock_store = MagicMock()
+        return VaultEventHandler(vault=vault, store=mock_store, debounce_seconds=0.05)
+
+    def test_single_event_fires_upsert_once(self, vault: Path) -> None:
+        import time
+        handler = self._make_handler(vault)
+        src_path = str(vault / "projects/second-brain.md")
+
+        with patch("alaya.watcher.upsert_note") as mock_upsert, \
+             patch("alaya.watcher.chunk_note", return_value=[MagicMock()]), \
+             patch("alaya.watcher.embed_chunks", return_value=[MagicMock()]):
+            handler._debounced_upsert(src_path)
+            time.sleep(0.15)  # wait past debounce
+            mock_upsert.assert_called_once()
+
+    def test_rapid_events_fire_upsert_once(self, vault: Path) -> None:
+        import time
+        handler = self._make_handler(vault)
+        src_path = str(vault / "projects/second-brain.md")
+
+        with patch("alaya.watcher.upsert_note") as mock_upsert, \
+             patch("alaya.watcher.chunk_note", return_value=[MagicMock()]), \
+             patch("alaya.watcher.embed_chunks", return_value=[MagicMock()]):
+            # rapid-fire 5 events — debounce resets each time
+            for _ in range(5):
+                handler._debounced_upsert(src_path)
+            time.sleep(0.15)  # wait past debounce
+            mock_upsert.assert_called_once()
+
+    def test_different_files_have_independent_debounce(self, vault: Path) -> None:
+        import time
+        handler = self._make_handler(vault)
+        path_a = str(vault / "projects/second-brain.md")
+        path_b = str(vault / "resources/kubernetes-notes.md")
+
+        with patch("alaya.watcher.upsert_note") as mock_upsert, \
+             patch("alaya.watcher.chunk_note", return_value=[MagicMock()]), \
+             patch("alaya.watcher.embed_chunks", return_value=[MagicMock()]):
+            handler._debounced_upsert(path_a)
+            handler._debounced_upsert(path_b)
+            time.sleep(0.15)
+            assert mock_upsert.call_count == 2
+
+    def test_timer_cleaned_up_after_firing(self, vault: Path) -> None:
+        import time
+        handler = self._make_handler(vault)
+        src_path = str(vault / "projects/second-brain.md")
+
+        with patch("alaya.watcher.upsert_note"), \
+             patch("alaya.watcher.chunk_note", return_value=[MagicMock()]), \
+             patch("alaya.watcher.embed_chunks", return_value=[MagicMock()]):
+            handler._debounced_upsert(src_path)
+            assert src_path in handler._timers
+            time.sleep(0.15)
+            # timer entry removed after firing
+            assert src_path not in handler._timers

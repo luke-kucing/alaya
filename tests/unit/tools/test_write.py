@@ -75,6 +75,11 @@ class TestCreateNote:
         assert isinstance(path, str)
         assert not path.startswith("/")
 
+    def test_duplicate_raises_file_exists_error(self, vault: Path) -> None:
+        create_note(title="dupe note", directory="ideas", tags=[], body="original", vault=vault)
+        with pytest.raises(FileExistsError, match="already exists"):
+            create_note(title="dupe note", directory="ideas", tags=[], body="overwrite attempt", vault=vault)
+
 
 class TestAppendToNote:
     def test_appends_text_to_existing_note(self, vault: Path) -> None:
@@ -95,6 +100,55 @@ class TestAppendToNote:
     def test_path_traversal_rejected(self, vault: Path) -> None:
         with pytest.raises(ValueError):
             append_to_note("../../etc/passwd", "text", vault)
+
+    # --- section_header (R-WR-03) ---
+
+    def test_section_header_appends_under_section(self, vault: Path) -> None:
+        # second-brain.md has a "## Notes" section
+        append_to_note("projects/second-brain.md", "New section entry.", vault, section_header="Notes")
+        content = (vault / "projects/second-brain.md").read_text()
+        lines = content.splitlines()
+        notes_idx = next(i for i, l in enumerate(lines) if l.strip() == "## Notes")
+        # the appended text should appear after ## Notes, before the next ## header
+        rest = "\n".join(lines[notes_idx:])
+        assert "New section entry." in rest
+
+    def test_section_header_missing_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="[Ss]ection"):
+            append_to_note("projects/second-brain.md", "text", vault, section_header="Nonexistent Section")
+
+    def test_section_header_inserts_before_next_section(self, vault: Path) -> None:
+        # Content after ## Notes should appear before ## Links
+        append_to_note("projects/second-brain.md", "Inserted line.", vault, section_header="Notes")
+        content = (vault / "projects/second-brain.md").read_text()
+        lines = content.splitlines()
+        inserted_idx = next(i for i, l in enumerate(lines) if "Inserted line." in l)
+        links_idx = next(i for i, l in enumerate(lines) if l.strip() == "## Links")
+        assert inserted_idx < links_idx
+
+    # --- dated (R-WR-03) ---
+
+    def test_dated_prepends_date_header(self, vault: Path) -> None:
+        from datetime import date
+        today = date.today().isoformat()
+        append_to_note("projects/second-brain.md", "Meeting note.", vault, dated=True)
+        content = (vault / "projects/second-brain.md").read_text()
+        assert f"### {today}" in content
+        assert "Meeting note." in content
+
+    def test_dated_with_section_header(self, vault: Path) -> None:
+        from datetime import date
+        today = date.today().isoformat()
+        append_to_note(
+            "projects/second-brain.md",
+            "1:1 note.",
+            vault,
+            section_header="Notes",
+            dated=True,
+        )
+        content = (vault / "projects/second-brain.md").read_text()
+        assert f"### {today}" in content
+        assert "1:1 note." in content
 
 
 class TestUpdateTags:
