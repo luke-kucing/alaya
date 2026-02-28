@@ -34,6 +34,36 @@ def _register_all(vault: Path) -> None:
     ingest._register(mcp, vault)
 
 
+def _register_index_listener(vault: Path) -> None:
+    """Subscribe the index updater to note change events emitted by write tools."""
+    from alaya.events import on_note_change
+    from alaya.index.store import get_store, upsert_note, delete_note_from_index, update_metadata
+    from alaya.index.embedder import chunk_note, embed_chunks
+
+    store = get_store(vault)
+
+    def _handle(event_type: str, path: str) -> None:
+        try:
+            if event_type in ("created", "modified"):
+                content = (vault / path).read_text()
+                chunks = chunk_note(path, content)
+                embeddings = embed_chunks(chunks)
+                upsert_note(path, chunks, embeddings, store)
+                logger.debug("Index updated for %s (%s)", path, event_type)
+            elif event_type == "deleted":
+                delete_note_from_index(path, store)
+                logger.debug("Index entry removed for %s", path)
+            elif event_type == "moved":
+                # format: "old_path:new_path"
+                old_path, _, new_path = path.partition(":")
+                update_metadata(old_path, new_path, new_title=None, new_tags=None, store=store)
+                logger.debug("Index metadata updated: %s -> %s", old_path, new_path)
+        except Exception as e:
+            logger.warning("Index update failed for %s (%s): %s", path, event_type, e)
+
+    on_note_change(_handle)
+
+
 def main() -> None:
     try:
         vault_root = get_vault_root()
@@ -44,6 +74,7 @@ def main() -> None:
     logger.info("alaya starting — vault root: %s", vault_root)
 
     _register_all(vault_root)
+    _register_index_listener(vault_root)
 
     from alaya.index.store import get_store
     from alaya.watcher import start_watcher

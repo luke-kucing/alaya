@@ -96,6 +96,43 @@ def delete_note_from_index(path: str, store: VaultStore) -> None:
         logger.warning("Failed to delete %s from index: %s", path, e)
 
 
+def update_metadata(
+    old_path: str,
+    new_path: str,
+    new_title: str | None,
+    new_tags: list[str] | None,
+    store: VaultStore,
+) -> None:
+    """Update path/title/tags on all chunks for old_path without re-embedding."""
+    safe_old = old_path.replace("'", "''")
+    new_directory = new_path.split("/")[0] if "/" in new_path else ""
+
+    try:
+        table = store._get_table()
+        existing = table.search().where(f"path = '{safe_old}'").limit(10000).to_list()
+        if not existing:
+            return
+
+        table.delete(f"path = '{safe_old}'")
+
+        updated = []
+        for row in existing:
+            row = dict(row)
+            row["path"] = new_path
+            row["directory"] = new_directory
+            if new_title is not None:
+                row["title"] = new_title
+            if new_tags is not None:
+                row["tags"] = ",".join(new_tags)
+            # remove LanceDB internal fields before re-inserting
+            row.pop("_distance", None)
+            updated.append(row)
+
+        table.add(updated)
+    except Exception as e:
+        logger.warning("Failed to update metadata for %s: %s", old_path, e)
+
+
 def hybrid_search(
     query: str,
     query_embedding: np.ndarray,

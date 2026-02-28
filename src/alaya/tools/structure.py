@@ -6,6 +6,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
+from alaya.events import emit
 from alaya.vault import resolve_note_path
 from alaya.tools.write import _validate_directory, _slugify
 
@@ -87,7 +88,9 @@ def move_note(relative_path: str, destination_dir: str, vault: Path) -> str:
     dest = dest_dir / src.name
 
     shutil.move(str(src), str(dest))
-    return str(dest.relative_to(vault))
+    new_relative = str(dest.relative_to(vault))
+    emit("moved", f"{relative_path}:{new_relative}")
+    return new_relative
 
 
 def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
@@ -117,7 +120,9 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
     # update all [[old_title]] → [[new_slug]] across vault
     find_and_replace_wikilinks(old_title, new_slug, vault)
 
-    return str(dest.relative_to(vault))
+    new_relative = str(dest.relative_to(vault))
+    emit("moved", f"{relative_path}:{new_relative}")
+    return new_relative
 
 
 def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> str:
@@ -146,7 +151,9 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> s
     dest = archives_dir / src.name
 
     shutil.move(str(src), str(dest))
-    return str(dest.relative_to(vault))
+    archive_relative = str(dest.relative_to(vault))
+    emit("deleted", relative_path)
+    return archive_relative
 
 
 # --- FastMCP tool registration ---
