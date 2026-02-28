@@ -25,18 +25,18 @@ class TestMoveNote:
         with pytest.raises(ValueError):
             move_note("ideas/voice-capture.md", "../../etc", vault)
 
-    def test_wikilinks_updated_in_referencing_notes(self, vault: Path) -> None:
-        # voice-capture.md is linked from ideas/ — second-brain links to [[second-brain]]
-        # we add a wikilink to a note we control and verify it updates
+    def test_wikilinks_unchanged_after_move(self, vault: Path) -> None:
+        # zk uses title-based wikilinks ([[title]]). Moving a file changes its
+        # directory but not its title, so existing wikilinks remain valid.
         note = vault / "projects/second-brain.md"
-        original = note.read_text()
-        note.write_text(original + "\n- [[voice-capture]]\n")
+        note.write_text(note.read_text() + "\n- [[voice-capture]]\n")
 
         move_note("ideas/voice-capture.md", "resources", vault)
 
-        content = note.read_text()
-        # wikilink title stays the same (title doesn't change on move)
-        assert "[[voice-capture]]" in content
+        # [[voice-capture]] is still valid — the title hasn't changed
+        assert "[[voice-capture]]" in note.read_text()
+        # the file itself is at the new location
+        assert (vault / "resources/voice-capture.md").exists()
 
     def test_path_traversal_rejected(self, vault: Path) -> None:
         with pytest.raises(ValueError):

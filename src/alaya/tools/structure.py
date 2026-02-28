@@ -50,7 +50,13 @@ def find_references(
 
 
 def move_note(relative_path: str, destination_dir: str, vault: Path) -> str:
-    """Move a note to destination_dir. Returns the new relative path."""
+    """Move a note to destination_dir. Returns the new relative path.
+
+    zk uses title-based wikilinks ([[title]]). A directory move changes the
+    file path but not the title, so all existing wikilinks remain valid and
+    no vault-wide replacement is needed. Use rename_note when you need to
+    update wikilinks.
+    """
     src = resolve_note_path(relative_path, vault)
     if not src.exists():
         raise FileNotFoundError(f"Note not found: {relative_path}")
