@@ -42,6 +42,7 @@ class VaultEventHandler(FileSystemEventHandler):
         self._timers: dict[str, threading.Timer] = {}
         self._recently_indexed: dict[str, float] = {}
         self._lock = threading.Lock()
+        self._ingest_threads: list[threading.Thread] = []
 
     def mark_indexed(self, relative_path: str) -> None:
         """Mark a path as recently indexed by the event system."""
@@ -127,15 +128,36 @@ class VaultEventHandler(FileSystemEventHandler):
                 delete_note_from_index(rel, self.store)
 
     def _trigger_ingest(self, src_path: str) -> None:
-        """Fire-and-forget ingest for a file dropped into raw/."""
+        """Spawn an ingest thread for a file dropped into raw/.
+
+        Threads are tracked so stop() can wait for them to finish before shutdown.
+        """
         def _run():
             try:
                 ingest(src_path, vault=self.vault)
             except Exception as e:
                 logger.warning("Failed to ingest %s: %s", src_path, e)
 
+        # Prune completed threads before adding a new one
+        with self._lock:
+            self._ingest_threads = [t for t in self._ingest_threads if t.is_alive()]
+
         thread = threading.Thread(target=_run, daemon=True)
+        with self._lock:
+            self._ingest_threads.append(thread)
         thread.start()
+
+    def stop(self, timeout: float = 30.0) -> None:
+        """Wait for all in-flight ingest threads to finish.
+
+        Called during server shutdown to avoid cutting off active ingestion.
+        """
+        with self._lock:
+            threads = list(self._ingest_threads)
+        for thread in threads:
+            thread.join(timeout=timeout)
+            if thread.is_alive():
+                logger.warning("Ingest thread did not finish within %ss during shutdown", timeout)
 
 
 def start_watcher(vault: Path, store: VaultStore) -> tuple[Observer, VaultEventHandler]:

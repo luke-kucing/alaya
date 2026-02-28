@@ -100,6 +100,7 @@ def main() -> None:
     finally:
         observer.stop()
         observer.join()
+        handler.stop()
         logger.info("File watcher stopped")
 
 
