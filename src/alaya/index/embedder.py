@@ -1,4 +1,4 @@
-"""Embedder: chunk notes by section, embed with nomic-embed-text-v1.5 (fastembed)."""
+"""Embedder: chunk notes and embed with fastembed (model from registry)."""
 from __future__ import annotations
 
 import logging
@@ -6,20 +6,27 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from alaya.index.models import get_active_model
+
 logger = logging.getLogger(__name__)
 
-_MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
-_model = None  # lazy-loaded singleton
+_model = None
+_loaded_model_name: str | None = None  # track which model is loaded
 
 
 def _get_model():
-    global _model
-    if _model is None:
-        logger.info("Loading embedding model: %s", _MODEL_NAME)
+    global _model, _loaded_model_name
+    cfg = get_active_model()
+    if _model is None or _loaded_model_name != cfg.name:
+        logger.info("Loading embedding model: %s", cfg.name)
         from fastembed import TextEmbedding
-        _model = TextEmbedding(_MODEL_NAME)
+        kwargs = {}
+        if cfg.file_name:
+            kwargs["model_file"] = cfg.file_name
+        _model = TextEmbedding(cfg.name, **kwargs)
+        _loaded_model_name = cfg.name
         logger.info("Embedding model loaded")
-    return _model
+    return _model, cfg
 
 
 @dataclass
@@ -42,9 +49,8 @@ def chunk_note(path: str, content: str) -> list[Chunk]:
 
 def embed_chunks(chunks: list[Chunk]) -> list[np.ndarray]:
     """Embed a list of chunks. Returns one normalized float32 ndarray per chunk."""
-    model = _get_model()
-    # nomic-embed requires a task prefix; "search_document:" for indexed content
-    texts = [f"search_document: {c.text}" for c in chunks]
+    model, cfg = _get_model()
+    texts = [f"{cfg.document_prefix}{c.text}" for c in chunks]
     raw = np.array(list(model.embed(texts)))
     norms = np.linalg.norm(raw, axis=1, keepdims=True)
     normalized = (raw / np.where(norms == 0, 1, norms)).astype(np.float32)

@@ -53,18 +53,20 @@ class TestChunkNote:
 
 
 class TestEmbedChunks:
-    def _mock_model(self, n: int):
-        """Return a mock fastembed model whose embed() yields n random vectors."""
+    def _mock_get_model(self, n: int):
+        """Return a (mock_model, mock_cfg) tuple matching the new _get_model() API."""
+        from alaya.index.models import MODELS, DEFAULT_MODEL_KEY
         mock_model = MagicMock()
         vecs = np.random.rand(n, 768).astype(np.float64)
         mock_model.embed.return_value = iter(vecs)
-        return mock_model
+        cfg = MODELS[DEFAULT_MODEL_KEY]
+        return (mock_model, cfg)
 
     def test_returns_array_per_chunk(self, vault: Path) -> None:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_model(len(chunks))):
+        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(len(chunks))):
             embeddings = embed_chunks(chunks)
 
         assert len(embeddings) == len(chunks)
@@ -74,7 +76,7 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)[:2]
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_model(2)):
+        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(2)):
             embeddings = embed_chunks(chunks)
 
         assert embeddings[0].shape == (768,)
@@ -83,7 +85,7 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)[:1]
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_model(1)):
+        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(1)):
             embeddings = embed_chunks(chunks)
 
         assert embeddings[0].dtype == np.float32
@@ -92,7 +94,7 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)[:1]
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_model(1)):
+        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(1)):
             embeddings = embed_chunks(chunks)
 
         norm = np.linalg.norm(embeddings[0])

@@ -80,8 +80,8 @@ def _find_suggested_links(text: str, vault: Path, limit: int = 5) -> list[dict]:
         from alaya.index.store import get_store, hybrid_search
         import numpy as np
 
-        model = _get_model()
-        raw = np.array(list(model.query_embed([f"search_query: {text[:512]}"])))
+        model, cfg = _get_model()
+        raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text[:512]}"])))
         norm = np.linalg.norm(raw[0])
         embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
         store = get_store(vault)

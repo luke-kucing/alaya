@@ -28,8 +28,8 @@ def _run_hybrid_search(
     from alaya.index.store import get_store, hybrid_search
 
     import numpy as np
-    model = _get_model()
-    raw = np.array(list(model.query_embed([f"search_query: {query}"])))
+    model, cfg = _get_model()
+    raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{query}"])))
     norm = np.linalg.norm(raw[0])
     query_embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
 

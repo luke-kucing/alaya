@@ -12,7 +12,11 @@ import pyarrow as pa
 logger = logging.getLogger(__name__)
 
 _TABLE_NAME = "notes"
-_DIM = 768
+
+
+def _get_dim() -> int:
+    from alaya.index.models import get_active_model
+    return get_active_model().dimensions
 
 
 @dataclass
@@ -39,7 +43,7 @@ class VaultStore:
                 pa.field("modified_date", pa.string()),
                 pa.field("chunk_index", pa.int32()),
                 pa.field("text", pa.string()),
-                pa.field("vector", pa.list_(pa.float32(), _DIM)),
+                pa.field("vector", pa.list_(pa.float32(), _get_dim())),
             ])
             self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
         return self._table
