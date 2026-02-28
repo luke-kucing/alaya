@@ -185,14 +185,12 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def create_note_tool(title: str, directory: str, tags: list[str], body: str = "") -> str:
         """Create a new note. Returns the relative path of the created file."""
         try:
-            return create_note(title, directory, tags, body, vault_root())
+            return create_note(title, directory, tags, body, vault)
         except FileExistsError as e:
             return error(ALREADY_EXISTS, str(e))
         except ValueError as e:
@@ -208,7 +206,7 @@ def _register(mcp: FastMCP) -> None:
         """Append text to an existing note. Optionally target a section and/or prepend a date heading."""
         try:
             append_to_note(
-                path, text, vault_root(),
+                path, text, vault,
                 section_header=section_header or None,
                 dated=dated,
             )
@@ -227,7 +225,7 @@ def _register(mcp: FastMCP) -> None:
     def update_tags_tool(path: str, add: list[str], remove: list[str]) -> str:
         """Add or remove tags on an existing note."""
         try:
-            update_tags(path, add, remove, vault_root())
+            update_tags(path, add, remove, vault)
             return f"Tags updated on `{path}`."
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))

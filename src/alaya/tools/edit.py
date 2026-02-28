@@ -109,14 +109,12 @@ def extract_section(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def replace_section_tool(path: str, section: str, new_content: str) -> str:
         """Replace the content of a named ## section in a note."""
         try:
-            replace_section(path, section, new_content, vault_root())
+            replace_section(path, section, new_content, vault)
             return f"Section '{section}' updated in `{path}`."
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
@@ -130,7 +128,7 @@ def _register(mcp: FastMCP) -> None:
     def extract_section_tool(source: str, section: str, new_title: str, new_directory: str) -> str:
         """Extract a ## section into a new note, leaving a wikilink in the original."""
         try:
-            new_path = extract_section(source, section, new_title, new_directory, vault_root())
+            new_path = extract_section(source, section, new_title, new_directory, vault)
             return f"Extracted '{section}' from `{source}` → `{new_path}`."
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))

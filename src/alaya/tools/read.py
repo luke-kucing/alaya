@@ -205,9 +205,7 @@ def get_tags(vault: Path) -> str:
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def get_note_tool(path: str = "", title: str = "") -> str:
         """Read a note. Provide exactly one of path (relative path) or title (frontmatter title)."""
@@ -217,8 +215,8 @@ def _register(mcp: FastMCP) -> None:
             return error(INVALID_ARGUMENT, "Either path or title is required.")
         try:
             if title:
-                return get_note_by_title(title, vault_root())
-            return get_note(path, vault_root())
+                return get_note_by_title(title, vault)
+            return get_note(path, vault)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:
@@ -237,7 +235,7 @@ def _register(mcp: FastMCP) -> None:
         """List notes. Filter by directory, tag, date range (since/until) or recent N days. Sort by modified/created/title."""
         try:
             return list_notes(
-                vault_root(),
+                vault,
                 directory=directory or None,
                 tag=tag or None,
                 limit=limit,
@@ -252,20 +250,20 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def get_backlinks_tool(path: str) -> str:
         """Return all notes that link to the given note (backlinks)."""
-        return get_backlinks(path, vault_root())
+        return get_backlinks(path, vault)
 
     @mcp.tool()
     def get_links_tool(path: str) -> str:
         """Return all notes that the given note links to (outgoing links)."""
-        return get_links(path, vault_root())
+        return get_links(path, vault)
 
     @mcp.tool()
     def get_tags_tool() -> str:
         """Return all tags in the vault with note counts."""
-        return get_tags(vault_root())
+        return get_tags(vault)
 
     @mcp.tool()
     def reindex_vault_tool(confirm: bool = False) -> str:
         """Rebuild the full LanceDB vector index. Requires confirm=True."""
-        return reindex_vault(vault_root(), confirm=confirm)
+        return reindex_vault(vault, confirm=confirm)
 

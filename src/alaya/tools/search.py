@@ -97,9 +97,7 @@ def search_notes(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def search_notes_tool(
         query: str,
@@ -111,7 +109,7 @@ def _register(mcp: FastMCP) -> None:
         """Search notes by keyword or semantic query. Filter by directory, tags, or since date."""
         return search_notes(
             query,
-            vault_root(),
+            vault,
             directory=directory or None,
             tags=tags or None,
             since=since or None,

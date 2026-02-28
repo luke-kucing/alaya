@@ -1,11 +1,26 @@
 """Tests that all expected tools are registered on the FastMCP server."""
 import pytest
-from alaya.server import mcp
+from pathlib import Path
+
+from fastmcp import FastMCP
+from alaya.tools import read, write, inbox, search, structure, edit, tasks, gitlab, ingest
 
 
 @pytest.mark.asyncio
-async def test_all_expected_tools_registered() -> None:
-    registered = {t.name for t in await mcp.list_tools()}
+async def test_all_expected_tools_registered(vault: Path) -> None:
+    # create a fresh mcp instance and register all tools against the vault fixture
+    test_mcp = FastMCP(name="alaya-test")
+    read._register(test_mcp, vault)
+    write._register(test_mcp, vault)
+    inbox._register(test_mcp, vault)
+    search._register(test_mcp, vault)
+    structure._register(test_mcp, vault)
+    edit._register(test_mcp, vault)
+    tasks._register(test_mcp, vault)
+    gitlab._register(test_mcp, vault)
+    ingest._register(test_mcp, vault)
+
+    registered = {t.name for t in await test_mcp.list_tools()}
     expected = {
         "get_note_tool",
         "list_notes_tool",

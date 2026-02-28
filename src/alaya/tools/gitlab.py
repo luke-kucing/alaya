@@ -46,7 +46,7 @@ def create_issue(
         return GITLAB_NOT_CONFIGURED
 
     if vault is None:
-        vault = get_vault_root()
+        vault = get_vault
 
     effective_labels = labels if labels is not None else get_gitlab_default_labels()
 
@@ -130,7 +130,7 @@ def issue_to_note(
         return GITLAB_NOT_CONFIGURED
 
     if vault is None:
-        vault = get_vault_root()
+        vault = get_vault
 
     output = run_glab(["issue", "view", str(issue_number), "--repo", project, "--output", "json"])
     issue = json.loads(output)
@@ -171,9 +171,7 @@ def issue_to_note(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def create_issue_tool(
         title: str,
@@ -182,7 +180,7 @@ def _register(mcp: FastMCP) -> None:
         note_path: str = "",
     ) -> str:
         """Create a GitLab issue. Optionally reference it in a vault note."""
-        result = create_issue(title, description, labels or None, note_path or None, vault_root())
+        result = create_issue(title, description, labels or None, note_path or None, vault)
         if isinstance(result, str):
             return result
         return f"Created issue #{result['issue_number']}: {result['url']}"
@@ -206,7 +204,7 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def issue_to_note_tool(issue_number: int, directory: str = "projects") -> str:
         """Pull a GitLab issue into the vault as a note."""
-        result = issue_to_note(issue_number, directory=directory, vault=vault_root())
+        result = issue_to_note(issue_number, directory=directory, vault=vault)
         if result == GITLAB_NOT_CONFIGURED:
             return result
         return f"Issue #{issue_number} → `{result}`"

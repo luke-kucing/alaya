@@ -72,13 +72,11 @@ def complete_todo(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def get_todos_tool(directories: list[str] | None = None) -> str:
         """Find all open tasks (- [ ] ...) in the vault. Optionally restrict to directories."""
-        todos = get_todos(vault_root(), directories=directories or None)
+        todos = get_todos(vault, directories=directories or None)
         if not todos:
             return "No open tasks found."
         lines = [f"- `{t['path']}:{t['line']}` — {t['text']}" for t in todos]
@@ -88,7 +86,7 @@ def _register(mcp: FastMCP) -> None:
     def complete_todo_tool(path: str, line: int, task_text: str) -> str:
         """Mark a task as complete. Uses fuzzy fallback if line number is stale."""
         try:
-            complete_todo(path, line, task_text, vault_root())
+            complete_todo(path, line, task_text, vault)
             return f"Completed: '{task_text}'"
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))

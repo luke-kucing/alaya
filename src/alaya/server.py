@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from fastmcp import FastMCP
 
@@ -18,18 +19,19 @@ mcp = FastMCP(
 )
 
 # Explicit registration: server -> tools (one direction only).
-# Each tool module exposes _register(mcp) and has no dependency on server.py.
+# vault is resolved once here and closed over in each tool wrapper.
 from alaya.tools import read, write, inbox, search, structure, edit, tasks, gitlab, ingest  # noqa: E402
 
-read._register(mcp)
-write._register(mcp)
-inbox._register(mcp)
-search._register(mcp)
-structure._register(mcp)
-edit._register(mcp)
-tasks._register(mcp)
-gitlab._register(mcp)
-ingest._register(mcp)
+def _register_all(vault: Path) -> None:
+    read._register(mcp, vault)
+    write._register(mcp, vault)
+    inbox._register(mcp, vault)
+    search._register(mcp, vault)
+    structure._register(mcp, vault)
+    edit._register(mcp, vault)
+    tasks._register(mcp, vault)
+    gitlab._register(mcp, vault)
+    ingest._register(mcp, vault)
 
 
 def main() -> None:
@@ -40,6 +42,8 @@ def main() -> None:
         raise SystemExit(1)
 
     logger.info("alaya starting — vault root: %s", vault_root)
+
+    _register_all(vault_root)
 
     from alaya.index.store import get_store
     from alaya.watcher import start_watcher

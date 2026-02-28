@@ -151,14 +151,12 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> s
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def move_note_tool(path: str, destination: str) -> str:
         """Move a note to a different directory. Returns the new path."""
         try:
-            return move_note(path, destination, vault_root())
+            return move_note(path, destination, vault)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:
@@ -168,7 +166,7 @@ def _register(mcp: FastMCP) -> None:
     def rename_note_tool(path: str, new_title: str) -> str:
         """Rename a note and update all wikilinks referencing it. Returns the new path."""
         try:
-            return rename_note(path, new_title, vault_root())
+            return rename_note(path, new_title, vault)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:
@@ -178,7 +176,7 @@ def _register(mcp: FastMCP) -> None:
     def delete_note_tool(path: str, reason: str = "") -> str:
         """Soft-delete a note by moving it to archives/."""
         try:
-            return delete_note(path, vault_root(), reason=reason or None)
+            return delete_note(path, vault, reason=reason or None)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:
@@ -187,7 +185,7 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def find_references_tool(title: str, include_text_mentions: bool = False) -> str:
         """Find all notes that reference the given title as a wikilink or text mention."""
-        results = find_references(title, vault_root(), include_text_mentions)
+        results = find_references(title, vault, include_text_mentions)
         if not results:
             return f"No references to '{title}' found."
         lines = [f"- `{r['path']}` ({r['type']})" for r in results]

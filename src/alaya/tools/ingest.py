@@ -100,7 +100,7 @@ def ingest(
     suggested_links. Summary generation is Claude's responsibility.
     """
     if vault is None:
-        vault = get_vault_root()
+        vault = get_vault
 
     tags = tags or []
     raw_text = ""
@@ -165,9 +165,7 @@ def ingest(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def ingest_tool(
         source: str,
@@ -179,7 +177,7 @@ def _register(mcp: FastMCP) -> None:
             source,
             title=title or None,
             tags=tags or [],
-            vault=vault_root(),
+            vault=vault,
         )
         links = "\n".join(f"- [[{r['title']}]]" for r in result.suggested_links[:5])
         links_section = f"\n\n**Suggested links:**\n{links}" if links else ""

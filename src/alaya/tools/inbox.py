@@ -78,24 +78,22 @@ def clear_inbox_item(text: str, vault: Path) -> None:
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP) -> None:
-    vault_root = get_vault_root
-
+def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def capture_to_inbox_tool(text: str) -> str:
         """Capture a quick note to inbox.md with a timestamp."""
-        return capture_to_inbox(text, vault_root())
+        return capture_to_inbox(text, vault)
 
     @mcp.tool()
     def get_inbox_tool() -> str:
         """Return the current inbox contents."""
-        return get_inbox(vault_root())
+        return get_inbox(vault)
 
     @mcp.tool()
     def clear_inbox_item_tool(text: str) -> str:
         """Remove an inbox item by matching text."""
         try:
-            clear_inbox_item(text, vault_root())
+            clear_inbox_item(text, vault)
             return f"Removed inbox item: '{text}'"
         except ValueError as e:
             return error(NOT_FOUND, str(e))
