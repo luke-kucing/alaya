@@ -42,3 +42,26 @@ class TestSearchNotes:
             result = search_notes("kubernetes", vault)
         assert isinstance(result, str)
         assert "|" in result  # markdown table
+
+    # --- tags and since filters (R-SQ-02) ---
+
+    def test_filter_by_tag_passes_tag_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.search.run_zk", return_value=ZK_SEARCH_OUTPUT.strip()) as mock_zk:
+            search_notes("kubernetes", vault, tags=["kubernetes"])
+        args = mock_zk.call_args[0][0]
+        assert "--tag" in args
+        assert "kubernetes" in args
+
+    def test_filter_by_multiple_tags(self, vault: Path) -> None:
+        with patch("alaya.tools.search.run_zk", return_value=ZK_SEARCH_OUTPUT.strip()) as mock_zk:
+            search_notes("notes", vault, tags=["kubernetes", "reference"])
+        args = mock_zk.call_args[0][0]
+        # each tag should appear after --tag
+        assert args.count("--tag") == 2
+
+    def test_since_passes_modified_after_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.search.run_zk", return_value=ZK_SEARCH_OUTPUT.strip()) as mock_zk:
+            search_notes("notes", vault, since="2026-01-01")
+        args = mock_zk.call_args[0][0]
+        assert "--modified-after" in args
+        assert "2026-01-01" in args

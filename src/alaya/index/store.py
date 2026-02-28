@@ -119,9 +119,17 @@ def hybrid_search(
 
         q = table.search(query_embedding.tolist(), vector_column_name="vector")
 
+        filters = []
         if directory:
             safe_directory = directory.replace("'", "''")
-            q = q.where(f"directory = '{safe_directory}'")
+            filters.append(f"directory = '{safe_directory}'")
+        if tags:
+            for tag in tags:
+                safe_tag = tag.replace("'", "''")
+                # tags column is comma-separated; match as substring
+                filters.append(f"tags LIKE '%{safe_tag}%'")
+        if filters:
+            q = q.where(" AND ".join(filters))
 
         results = q.limit(limit).to_list()
 

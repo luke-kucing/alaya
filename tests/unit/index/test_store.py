@@ -110,3 +110,33 @@ class TestHybridSearch:
         results = hybrid_search("content", query_embedding, store, directory="resources", limit=5)
         for r in results:
             assert r["directory"] == "resources"
+
+    def test_tags_filter_excludes_non_matching(self, tmp_path: Path) -> None:
+        store = VaultStore(tmp_path / "lance")
+        # kubernetes note has tag 'kubernetes'; project note has tag 'project'
+        k_chunks = [Chunk(
+            path="resources/kubernetes-notes.md",
+            title="kubernetes-notes",
+            tags=["kubernetes", "reference"],
+            directory="resources",
+            modified_date="2026-02-01",
+            chunk_index=0,
+            text="kubernetes helm charts",
+        )]
+        p_chunks = [Chunk(
+            path="projects/second-brain.md",
+            title="second-brain",
+            tags=["project"],
+            directory="projects",
+            modified_date="2026-02-23",
+            chunk_index=0,
+            text="project planning content",
+        )]
+        upsert_note("resources/kubernetes-notes.md", k_chunks, _fake_embeddings(k_chunks), store)
+        upsert_note("projects/second-brain.md", p_chunks, _fake_embeddings(p_chunks), store)
+
+        query_embedding = np.random.rand(768).astype(np.float32)
+        results = hybrid_search("content", query_embedding, store, tags=["kubernetes"], limit=5)
+        # every result should come from the kubernetes note (tag filter applied)
+        for r in results:
+            assert "kubernetes" in r["path"]
