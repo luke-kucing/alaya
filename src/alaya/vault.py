@@ -49,15 +49,26 @@ def render_frontmatter(meta: dict) -> str:
     return "\n".join(lines)
 
 
+_MAX_TAG_LINE_LEN = 500
+_MAX_TAGS = 50
+
+
 def _parse_inline_tags(body: str) -> list[str]:
-    """Extract #hashtags from the first non-empty tag line."""
+    """Extract #hashtags from the first non-empty tag line.
+
+    Lines longer than _MAX_TAG_LINE_LEN are skipped to avoid regex performance
+    issues. Returns at most _MAX_TAGS tags.
+    """
     for line in body.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
+        if len(stripped) > _MAX_TAG_LINE_LEN:
+            break
         tags = re.findall(r"#([\w-]+)", stripped)
-        if tags and re.match(r"^(#[\w-]+ ?)+$", stripped):
-            return tags
+        # re.fullmatch avoids catastrophic backtracking from the repeated group
+        if tags and re.fullmatch(r"(#[\w-]+ *)+", stripped):
+            return tags[:_MAX_TAGS]
         break
     return []
 
