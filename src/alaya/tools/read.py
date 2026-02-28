@@ -1,10 +1,32 @@
-"""Read tools: get_note, list_notes, get_backlinks, get_links, get_tags."""
+"""Read tools: get_note, list_notes, get_backlinks, get_links, get_tags, reindex_vault."""
 from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
 from alaya.vault import resolve_note_path
 from alaya.zk import run_zk, ZKError
+
+
+def _run_reindex(vault: Path):
+    from alaya.index.reindex import reindex_all
+    return reindex_all(vault)
+
+
+def reindex_vault(vault: Path, confirm: bool = False) -> str:
+    """Rebuild the full LanceDB vector index for the vault.
+
+    Requires confirm=True to prevent accidental triggering.
+    """
+    if not confirm:
+        return "Reindex requires confirm=True. This will rebuild the entire vector index."
+    try:
+        result = _run_reindex(vault)
+        return (
+            f"Reindex complete: {result.notes_indexed} notes, "
+            f"{result.chunks_created} chunks in {result.duration_seconds}s."
+        )
+    except Exception as e:
+        return f"Reindex failed: {e}"
 
 
 def get_note(relative_path: str, vault: Path) -> str:
@@ -138,6 +160,11 @@ def _register(mcp: FastMCP) -> None:
     def get_tags_tool() -> str:
         """Return all tags in the vault with note counts."""
         return get_tags(vault_root())
+
+    @mcp.tool()
+    def reindex_vault_tool(confirm: bool = False) -> str:
+        """Rebuild the full LanceDB vector index. Requires confirm=True."""
+        return reindex_vault(vault_root(), confirm=confirm)
 
 
 try:

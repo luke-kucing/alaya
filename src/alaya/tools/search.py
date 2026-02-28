@@ -1,9 +1,40 @@
 """Search tools: search_notes (M1: zk keyword fallback; M3: LanceDB hybrid)."""
 from pathlib import Path
 
+import numpy as np
+
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
 from alaya.zk import run_zk, ZKError
+
+
+def _hybrid_search_available(vault: Path) -> bool:
+    """Return True if a LanceDB index exists and has rows."""
+    try:
+        from alaya.index.store import get_store
+        store = get_store(vault)
+        return store.count() > 0
+    except Exception:
+        return False
+
+
+def _run_hybrid_search(
+    query: str,
+    vault: Path,
+    directory: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """Embed the query and run hybrid search against LanceDB."""
+    from alaya.index.embedder import _get_model
+    from alaya.index.store import get_store, hybrid_search
+
+    model = _get_model()
+    query_embedding = model.encode(
+        [f"search_query: {query}"], normalize_embeddings=True
+    )[0]
+
+    store = get_store(vault)
+    return hybrid_search(query, query_embedding, store, directory=directory, limit=limit)
 
 
 def search_notes(
@@ -12,7 +43,23 @@ def search_notes(
     directory: str | None = None,
     limit: int = 20,
 ) -> str:
-    """Search notes by keyword using zk. Returns a Markdown table of results."""
+    """Search notes by keyword or semantic query. Returns a Markdown table.
+
+    Uses LanceDB hybrid search when an index is available; falls back to
+    zk keyword search otherwise.
+    """
+    if _hybrid_search_available(vault):
+        results = _run_hybrid_search(query, vault, directory=directory, limit=limit)
+        if not results:
+            return "No notes matching that query."
+        rows = [
+            f"| [[{r['title']}]] | `{r['path']}` | {r['score']:.2f} |"
+            for r in results
+        ]
+        header = "| Title | Path | Score |\n|---|---|---|"
+        return header + "\n" + "\n".join(rows)
+
+    # fallback: zk keyword search
     args = [
         "list",
         "--match", query,
@@ -49,7 +96,7 @@ def _register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def search_notes_tool(query: str, directory: str = "", limit: int = 20) -> str:
-        """Search notes by keyword. Optionally restrict to a directory."""
+        """Search notes by keyword or semantic query. Optionally restrict to a directory."""
         return search_notes(query, vault_root(), directory=directory or None, limit=limit)
 
 
