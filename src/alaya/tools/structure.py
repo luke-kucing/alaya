@@ -78,12 +78,15 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
     if not src.exists():
         raise FileNotFoundError(f"Note not found: {relative_path}")
 
-    old_title = src.stem  # filename without extension is the wikilink key
+    # Use frontmatter title as the wikilink key; fall back to stem when absent.
+    # zk wikilinks reference the note title, not the filename.
+    content = src.read_text()
+    fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
+    old_title = fm_title_match.group(1).strip() if fm_title_match else src.stem
     new_slug = _slugify(new_title)
     dest = src.parent / f"{new_slug}.md"
 
-    # update frontmatter title
-    content = src.read_text()
+    # update frontmatter title (reuse already-read content)
     content = re.sub(r"^title:.*$", f"title: {new_title}", content, count=1, flags=re.MULTILINE)
     src.write_text(content)
 

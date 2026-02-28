@@ -69,6 +69,23 @@ class TestRenameNote:
         assert "[[audio-capture]]" in content
         assert "[[voice-capture]]" not in content
 
+    def test_wikilinks_matched_by_frontmatter_title(self, vault: Path) -> None:
+        # When the frontmatter title differs from the filename stem, wikilinks
+        # use the frontmatter title. Rename must use the frontmatter title for
+        # matching, not src.stem.
+        note_path = vault / "ideas/timestamped-note.md"
+        note_path.write_text(
+            "---\ntitle: My Special Note\ndate: 2026-01-01\n---\nContent.\n"
+        )
+        ref = vault / "projects/second-brain.md"
+        ref.write_text(ref.read_text() + "\n- [[My Special Note]]\n")
+
+        rename_note("ideas/timestamped-note.md", "renamed-note", vault)
+
+        content = ref.read_text()
+        assert "[[renamed-note]]" in content
+        assert "[[My Special Note]]" not in content
+
     def test_source_missing_raises(self, vault: Path) -> None:
         with pytest.raises(FileNotFoundError):
             rename_note("ideas/ghost.md", "something", vault)
