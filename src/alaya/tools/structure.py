@@ -8,6 +8,7 @@ from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.events import emit, NoteEvent
 from alaya.vault import resolve_note_path
 from alaya.tools.write import _validate_directory, _slugify
+from alaya.tools._locks import get_path_lock, atomic_write
 
 _ARCHIVES_DIR = "archives"
 
@@ -103,18 +104,17 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
 
     # Use frontmatter title as the wikilink key; fall back to stem when absent.
     # zk wikilinks reference the note title, not the filename.
-    content = src.read_text()
-    fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-    old_title = fm_title_match.group(1).strip() if fm_title_match else src.stem
-    new_slug = _slugify(new_title)
-    dest = src.parent / f"{new_slug}.md"
+    with get_path_lock(src):
+        content = src.read_text()
+        fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
+        old_title = fm_title_match.group(1).strip() if fm_title_match else src.stem
+        new_slug = _slugify(new_title)
+        dest = src.parent / f"{new_slug}.md"
 
-    # update frontmatter title (reuse already-read content)
-    content = re.sub(r"^title:.*$", f"title: {new_title}", content, count=1, flags=re.MULTILINE)
-    src.write_text(content)
-
-    # rename file
-    src.rename(dest)
+        # update frontmatter title then rename atomically
+        content = re.sub(r"^title:.*$", f"title: {new_title}", content, count=1, flags=re.MULTILINE)
+        atomic_write(src, content)
+        src.rename(dest)
 
     # update all [[old_title]] → [[new_slug]] across vault
     find_and_replace_wikilinks(old_title, new_slug, vault)
@@ -142,8 +142,9 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> s
             raise
 
     if reason:
-        existing = src.read_text()
-        src.write_text(_insert_frontmatter_field(existing, "archived_reason", reason))
+        with get_path_lock(src):
+            existing = src.read_text()
+            atomic_write(src, _insert_frontmatter_field(existing, "archived_reason", reason))
 
     archives_dir = vault / _ARCHIVES_DIR
     archives_dir.mkdir(exist_ok=True)

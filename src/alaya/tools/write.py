@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, ALREADY_EXISTS, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.events import emit, NoteEvent
 from alaya.vault import resolve_note_path
+from alaya.tools._locks import get_path_lock, atomic_write
 
 # Directories considered valid targets for note creation
 _VALID_DIRS = {
@@ -76,10 +77,11 @@ def create_note(
     if body:
         content_parts.append(body)
 
-    if file_path.exists():
-        raise FileExistsError(f"Note already exists: {file_path.relative_to(vault)}")
+    with get_path_lock(file_path):
+        if file_path.exists():
+            raise FileExistsError(f"Note already exists: {file_path.relative_to(vault)}")
+        atomic_write(file_path, "\n".join(content_parts) + "\n")
 
-    file_path.write_text("\n".join(content_parts) + "\n")
     relative = str(file_path.relative_to(vault))
     emit(NoteEvent("created", relative))
     return relative
@@ -98,40 +100,43 @@ def append_to_note(
     dated: prepend a '### YYYY-MM-DD' heading to the appended text.
     """
     path = resolve_note_path(relative_path, vault)
-    if not path.exists():
-        raise FileNotFoundError(f"Note not found: {relative_path}")
 
     if dated:
         text = f"### {date.today().isoformat()}\n{text}"
 
-    existing = path.read_text()
+    with get_path_lock(path):
+        if not path.exists():
+            raise FileNotFoundError(f"Note not found: {relative_path}")
 
-    if section_header is None:
-        separator = "\n" if existing.endswith("\n") else "\n\n"
-        path.write_text(existing + separator + text + "\n")
-        emit(NoteEvent("modified", relative_path))
-        return
+        existing = path.read_text()
 
-    # Insert under the named section, before the next ## heading or EOF
-    lines = existing.splitlines(keepends=True)
-    target = f"## {section_header}"
-    section_idx = next(
-        (i for i, l in enumerate(lines) if l.rstrip() == target),
-        None,
-    )
-    if section_idx is None:
-        raise ValueError(f"Section not found: '{section_header}'")
+        if section_header is None:
+            separator = "\n" if existing.endswith("\n") else "\n\n"
+            atomic_write(path, existing + separator + text + "\n")
+            emit(NoteEvent("modified", relative_path))
+            return
 
-    # find insertion point: end of this section (before the next ## or EOF)
-    insert_at = len(lines)
-    for i in range(section_idx + 1, len(lines)):
-        if lines[i].startswith("## "):
-            insert_at = i
-            break
+        # Insert under the named section, before the next ## heading or EOF
+        lines = existing.splitlines(keepends=True)
+        target = f"## {section_header}"
+        section_idx = next(
+            (i for i, l in enumerate(lines) if l.rstrip() == target),
+            None,
+        )
+        if section_idx is None:
+            raise ValueError(f"Section not found: '{section_header}'")
 
-    # inject a blank line + text before the insertion point
-    new_lines = lines[:insert_at] + ["\n", text + "\n"] + lines[insert_at:]
-    path.write_text("".join(new_lines))
+        # find insertion point: end of this section (before the next ## or EOF)
+        insert_at = len(lines)
+        for i in range(section_idx + 1, len(lines)):
+            if lines[i].startswith("## "):
+                insert_at = i
+                break
+
+        # inject a blank line + text before the insertion point
+        new_lines = lines[:insert_at] + ["\n", text + "\n"] + lines[insert_at:]
+        atomic_write(path, "".join(new_lines))
+
     emit(NoteEvent("modified", relative_path))
 
 
@@ -142,58 +147,57 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
     If the tag line doesn't exist, a new one is created after the closing ---.
     """
     path = resolve_note_path(relative_path, vault)
-    if not path.exists():
-        raise FileNotFoundError(f"Note not found: {relative_path}")
 
-    content = path.read_text()
+    with get_path_lock(path):
+        if not path.exists():
+            raise FileNotFoundError(f"Note not found: {relative_path}")
 
-    # find existing inline tag line (first non-empty line after closing ---)
-    lines = content.splitlines()
-    fm_end = -1
-    in_fm = False
-    for i, line in enumerate(lines):
-        if line.strip() == "---":
-            if not in_fm:
-                in_fm = True
-            else:
-                fm_end = i
-                break
+        content = path.read_text()
 
-    if fm_end == -1:
-        # no frontmatter, treat the whole file
+        # find existing inline tag line (first non-empty line after closing ---)
+        lines = content.splitlines()
         fm_end = -1
+        in_fm = False
+        for i, line in enumerate(lines):
+            if line.strip() == "---":
+                if not in_fm:
+                    in_fm = True
+                else:
+                    fm_end = i
+                    break
 
-    # find the tag line: first line after frontmatter that contains only #words
-    tag_line_idx = None
-    for i in range(fm_end + 1, len(lines)):
-        line = lines[i].strip()
-        if not line:
-            continue
-        if re.match(r"^(#\w[\w-]* ?)+$", line):
-            tag_line_idx = i
-        break
+        # find the tag line: first line after frontmatter that contains only #words
+        tag_line_idx = None
+        for i in range(fm_end + 1, len(lines)):
+            line = lines[i].strip()
+            if not line:
+                continue
+            if re.match(r"^(#\w[\w-]* ?)+$", line):
+                tag_line_idx = i
+            break
 
-    if tag_line_idx is not None:
-        existing_tags = set(re.findall(r"#([\w-]+)", lines[tag_line_idx]))
-    else:
-        existing_tags = set()
+        if tag_line_idx is not None:
+            existing_tags = set(re.findall(r"#([\w-]+)", lines[tag_line_idx]))
+        else:
+            existing_tags = set()
 
-    updated_tags = (existing_tags | set(add)) - set(remove)
+        updated_tags = (existing_tags | set(add)) - set(remove)
 
-    # nothing changed — skip the write to avoid reordering tags
-    if updated_tags == existing_tags and not add:
-        return
+        # nothing changed — skip the write to avoid reordering tags
+        if updated_tags == existing_tags and not add:
+            return
 
-    new_tag_line = " ".join(f"#{t}" for t in sorted(updated_tags))
+        new_tag_line = " ".join(f"#{t}" for t in sorted(updated_tags))
 
-    if tag_line_idx is not None:
-        lines[tag_line_idx] = new_tag_line
-    else:
-        # insert after frontmatter closing ---
-        insert_at = fm_end + 1 if fm_end >= 0 else 0
-        lines.insert(insert_at, new_tag_line)
+        if tag_line_idx is not None:
+            lines[tag_line_idx] = new_tag_line
+        else:
+            # insert after frontmatter closing ---
+            insert_at = fm_end + 1 if fm_end >= 0 else 0
+            lines.insert(insert_at, new_tag_line)
 
-    path.write_text("\n".join(lines) + "\n")
+        atomic_write(path, "\n".join(lines) + "\n")
+
     emit(NoteEvent("modified", relative_path))
 
 

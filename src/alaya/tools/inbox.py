@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND
+from alaya.tools._locks import get_path_lock, atomic_write
 
 _INBOX_FILENAME = "inbox.md"
 
@@ -18,9 +19,10 @@ def capture_to_inbox(text: str, vault: Path) -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     entry = f"- {timestamp} {text}"
 
-    existing = inbox.read_text() if inbox.exists() else "# Inbox\n\nQuick capture. Process weekly.\n"
-    separator = "\n" if existing.endswith("\n") else "\n"
-    inbox.write_text(existing + separator + entry + "\n")
+    with get_path_lock(inbox):
+        existing = inbox.read_text() if inbox.exists() else "# Inbox\n\nQuick capture. Process weekly.\n"
+        separator = "\n" if existing.endswith("\n") else "\n"
+        atomic_write(inbox, existing + separator + entry + "\n")
 
     return f"Captured: {entry}"
 
@@ -53,24 +55,25 @@ def clear_inbox_item(text: str, vault: Path) -> None:
     """
     import re
     inbox = _inbox_path(vault)
-    lines = inbox.read_text().splitlines(keepends=True)
-
     _TS_PREFIX = re.compile(r"^-\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+")
 
-    # first pass: exact content match (strip timestamp prefix)
-    for i, line in enumerate(lines):
-        stripped = _TS_PREFIX.sub("", line.rstrip())
-        if stripped == text:
-            lines.pop(i)
-            inbox.write_text("".join(lines))
-            return
+    with get_path_lock(inbox):
+        lines = inbox.read_text().splitlines(keepends=True)
 
-    # second pass: substring match fallback
-    for i, line in enumerate(lines):
-        if text in line:
-            lines.pop(i)
-            inbox.write_text("".join(lines))
-            return
+        # first pass: exact content match (strip timestamp prefix)
+        for i, line in enumerate(lines):
+            stripped = _TS_PREFIX.sub("", line.rstrip())
+            if stripped == text:
+                lines.pop(i)
+                atomic_write(inbox, "".join(lines))
+                return
+
+        # second pass: substring match fallback
+        for i, line in enumerate(lines):
+            if text in line:
+                lines.pop(i)
+                atomic_write(inbox, "".join(lines))
+                return
 
     raise ValueError(f"Inbox item not found: '{text}'")
 
