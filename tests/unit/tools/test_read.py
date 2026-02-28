@@ -90,6 +90,14 @@ class TestGetBacklinks:
             result = get_backlinks("ideas/voice-capture.md", vault)
         assert "no backlinks" in result.lower()
 
+    def test_uses_link_to_flag(self, vault: Path) -> None:
+        # --link-to PATH finds notes linking TO PATH (i.e. backlinks)
+        with patch("alaya.tools.read.run_zk", return_value=ZK_BACKLINKS_OUTPUT.strip()) as mock_zk:
+            get_backlinks("projects/second-brain.md", vault)
+        args = mock_zk.call_args[0][0]
+        assert "--link-to" in args
+        assert "--linked-by" not in args
+
     def test_path_traversal_rejected(self, vault: Path) -> None:
         with pytest.raises(ValueError):
             get_backlinks("../../etc/passwd", vault)
@@ -106,6 +114,14 @@ class TestGetLinks:
         with patch("alaya.tools.read.run_zk", return_value=""):
             result = get_links("ideas/voice-capture.md", vault)
         assert "no links" in result.lower()
+
+    def test_uses_linked_by_flag(self, vault: Path) -> None:
+        # --linked-by PATH finds notes linked by PATH (i.e. forward/outgoing links)
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LINKS_OUTPUT.strip()) as mock_zk:
+            get_links("projects/second-brain.md", vault)
+        args = mock_zk.call_args[0][0]
+        assert "--linked-by" in args
+        assert "--link-to" not in args
 
 
 class TestGetTags:
