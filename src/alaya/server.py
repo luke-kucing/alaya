@@ -14,7 +14,8 @@ mcp = FastMCP(
         "You are connected to a zk-managed personal knowledge vault. "
         "Use the available tools to read, write, search, and organize notes. "
         "Always confirm before moving, renaming, deleting, or bulk-modifying notes. "
-        "Capture is always safe — no confirmation needed for append or inbox operations."
+        "Capture is always safe — no confirmation needed for append or inbox operations. "
+        "If search results seem stale or incomplete, call vault_health to check index sync status."
     ),
 )
 
@@ -42,6 +43,7 @@ def _register_index_listener(vault: Path, watcher_handler=None) -> None:
     from alaya.events import NoteEvent, on_note_change
     from alaya.index.store import get_store, upsert_note, delete_note_from_index, update_metadata
     from alaya.index.embedder import chunk_note, embed_chunks
+    from alaya.index import health
 
     store = get_store(vault)
 
@@ -54,11 +56,13 @@ def _register_index_listener(vault: Path, watcher_handler=None) -> None:
                 upsert_note(event.path, chunks, embeddings, store)
                 if watcher_handler:
                     watcher_handler.mark_indexed(event.path)
+                health.record_success(event.path)
                 logger.debug("Index updated for %s (%s)", event.path, event.event_type)
             elif event.event_type == "deleted":
                 delete_note_from_index(event.path, store)
                 if watcher_handler:
                     watcher_handler.mark_indexed(event.path)
+                health.record_success(event.path)
                 logger.debug("Index entry removed for %s", event.path)
             elif event.event_type == "moved":
                 update_metadata(
@@ -69,11 +73,44 @@ def _register_index_listener(vault: Path, watcher_handler=None) -> None:
                     watcher_handler.mark_indexed(event.path)
                     if event.old_path:
                         watcher_handler.mark_indexed(event.old_path)
+                health.record_success(event.path)
                 logger.debug("Index metadata updated: %s -> %s", event.old_path, event.path)
         except Exception as e:
+            health.record_failure(event.path, str(e))
             logger.warning("Index update failed for %s (%s): %s", event.path, event.event_type, e)
 
     on_note_change(_handle)
+
+
+def _register_health_tool(vault: Path) -> None:
+    """Register a vault_health tool that exposes index sync status."""
+    from alaya.index import health
+    from alaya.index.store import get_store
+
+    store = get_store(vault)
+
+    @mcp.tool()
+    def vault_health() -> str:
+        """Check index sync status. Call this if search results seem stale or incomplete."""
+        status = health.get_status()
+        chunks = store.count()
+        lines = [f"Indexed chunks: {chunks}"]
+
+        last_ago = status["last_success_ago_seconds"]
+        if last_ago is None:
+            lines.append("Last successful index: never (no events processed yet)")
+        else:
+            lines.append(f"Last successful index: {last_ago}s ago")
+
+        failed = status["failed_paths"]
+        if failed:
+            lines.append(f"\nFailed paths ({len(failed)}):")
+            for path, msg in failed.items():
+                lines.append(f"  {path}: {msg}")
+        else:
+            lines.append("No failed paths.")
+
+        return "\n".join(lines)
 
 
 def main() -> None:
@@ -86,6 +123,7 @@ def main() -> None:
     logger.info("alaya starting — vault root: %s", vault_root)
 
     _register_all(vault_root)
+    _register_health_tool(vault_root)
 
     from alaya.index.store import get_store
     from alaya.watcher import start_watcher
