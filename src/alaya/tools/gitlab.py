@@ -178,7 +178,7 @@ def _register(mcp: FastMCP) -> None:
     def create_issue_tool(
         title: str,
         description: str = "",
-        labels: list[str] = [],
+        labels: list[str] | None = None,
         note_path: str = "",
     ) -> str:
         """Create a GitLab issue. Optionally reference it in a vault note."""

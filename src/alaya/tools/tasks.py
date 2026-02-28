@@ -77,7 +77,7 @@ def _register(mcp: FastMCP) -> None:
     vault_root = get_vault_root
 
     @mcp.tool()
-    def get_todos_tool(directories: list[str] = []) -> str:
+    def get_todos_tool(directories: list[str] | None = None) -> str:
         """Find all open tasks (- [ ] ...) in the vault. Optionally restrict to directories."""
         todos = get_todos(vault_root(), directories=directories or None)
         if not todos:

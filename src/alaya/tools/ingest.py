@@ -172,14 +172,14 @@ def _register(mcp: FastMCP) -> None:
     def ingest_tool(
         source: str,
         title: str = "",
-        tags: list[str] = [],
+        tags: list[str] | None = None,
         depth: int = 0,
     ) -> str:
         """Ingest a URL, PDF, or markdown file. Returns raw_text, title, chunks indexed, and suggested wikilinks."""
         result = ingest(
             source,
             title=title or None,
-            tags=tags,
+            tags=tags or [],
             depth=depth,
             vault=vault_root(),
         )
