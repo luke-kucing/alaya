@@ -28,10 +28,11 @@ class VaultEventHandler(FileSystemEventHandler):
     - directories and non-text files → ignored
     """
 
-    def __init__(self, vault: Path, store: VaultStore) -> None:
+    def __init__(self, vault: Path, store: VaultStore, debounce_seconds: float = _DEBOUNCE_SECONDS) -> None:
         super().__init__()
         self.vault = vault
         self.store = store
+        self._debounce_seconds = debounce_seconds
         self._timers: dict[str, threading.Timer] = {}
 
     def _is_ignored(self, path: str) -> bool:
@@ -45,7 +46,7 @@ class VaultEventHandler(FileSystemEventHandler):
         """Schedule an upsert with debounce — resets the timer on repeated events."""
         if src_path in self._timers:
             self._timers[src_path].cancel()
-        timer = threading.Timer(_DEBOUNCE_SECONDS, self._do_upsert, args=[src_path])
+        timer = threading.Timer(self._debounce_seconds, self._do_upsert, args=[src_path])
         self._timers[src_path] = timer
         timer.start()
 
