@@ -21,14 +21,33 @@ class IngestResult:
     suggested_links: list[dict] = field(default_factory=list)
 
 
-def _fetch_url(url: str) -> tuple[str, str]:
-    """Fetch a URL and return (title, html_content)."""
+def _fetch_url(url: str, _retries: int = 3, _backoff: float = 1.0) -> tuple[str, str]:
+    """Fetch a URL and return (title, html_content).
+
+    Retries up to _retries times with exponential backoff on transient errors
+    (network failures and 5xx / 429 responses). 4xx client errors are not
+    retried — they indicate a deterministic failure.
+    """
+    import time
     import httpx
-    response = httpx.get(url, timeout=30, follow_redirects=True)
-    response.raise_for_status()
-    # naive title extraction — trafilatura does the real work
-    title = url.split("/")[-1] or url
-    return title, response.text
+
+    last_exc: Exception | None = None
+    for attempt in range(_retries):
+        try:
+            response = httpx.get(url, timeout=30, follow_redirects=True)
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < _retries - 1:
+                time.sleep(_backoff * (2 ** attempt))
+                continue
+            response.raise_for_status()
+            # naive title extraction — trafilatura does the real work
+            title = url.split("/")[-1] or url
+            return title, response.text
+        except httpx.TransportError as exc:
+            last_exc = exc
+            if attempt < _retries - 1:
+                time.sleep(_backoff * (2 ** attempt))
+
+    raise last_exc or httpx.HTTPError(f"Failed to fetch {url} after {_retries} attempts")
 
 
 def _extract_text_from_html(html: str, url: str = "") -> str:

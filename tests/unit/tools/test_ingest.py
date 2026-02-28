@@ -1,10 +1,10 @@
 """Unit tests for the ingest tool — HTTP and file I/O are mocked."""
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from alaya.tools.ingest import ingest, IngestResult
+from alaya.tools.ingest import ingest, IngestResult, _fetch_url
 
 
 SAMPLE_HTML = """
@@ -118,6 +118,64 @@ class TestIngestTags:
         # tags should be passed along to indexing
         call_kwargs = mock_index.call_args
         assert call_kwargs is not None
+
+
+class TestFetchUrlRetry:
+    """Tests for retry logic in _fetch_url."""
+
+    def test_success_on_first_attempt_returns_result(self) -> None:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html>content</html>"
+        with patch("httpx.get", return_value=mock_response):
+            title, html = _fetch_url("https://example.com/page", _retries=3, _backoff=0)
+        assert html == "<html>content</html>"
+
+    def test_retries_on_transport_error_then_succeeds(self) -> None:
+        import httpx
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html>content</html>"
+        with patch("httpx.get", side_effect=[
+            httpx.TransportError("connection reset"),
+            mock_response,
+        ]), patch("time.sleep"):
+            title, html = _fetch_url("https://example.com/page", _retries=3, _backoff=0)
+        assert html == "<html>content</html>"
+
+    def test_raises_after_all_retries_exhausted(self) -> None:
+        import httpx
+        with patch("httpx.get", side_effect=httpx.TransportError("timeout")), \
+             patch("time.sleep"):
+            with pytest.raises(httpx.TransportError):
+                _fetch_url("https://example.com/page", _retries=3, _backoff=0)
+
+    def test_retries_on_503(self) -> None:
+        import httpx
+        fail_response = MagicMock()
+        fail_response.status_code = 503
+
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.text = "content"
+
+        with patch("httpx.get", side_effect=[fail_response, ok_response]), \
+             patch("time.sleep"):
+            _, html = _fetch_url("https://example.com/page", _retries=3, _backoff=0)
+        assert html == "content"
+
+    def test_does_not_retry_on_404(self) -> None:
+        import httpx
+        error_response = MagicMock()
+        error_response.status_code = 404
+        error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404", request=MagicMock(), response=error_response
+        )
+        with patch("httpx.get", return_value=error_response) as mock_get:
+            with pytest.raises(httpx.HTTPStatusError):
+                _fetch_url("https://example.com/missing", _retries=3, _backoff=0)
+        # should only have been called once — no retry on 4xx
+        assert mock_get.call_count == 1
 
 
 class TestIngestDate:
