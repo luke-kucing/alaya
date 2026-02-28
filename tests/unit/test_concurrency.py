@@ -144,3 +144,60 @@ class TestWriteConcurrency:
         assert len(results) == 2
         assert (vault / results[0]).exists()
         assert (vault / results[1]).exists()
+
+    def test_concurrent_update_tags_no_data_loss(self, vault: Path) -> None:
+        """Two threads adding different tags must both survive in the file."""
+        from alaya.tools.write import update_tags
+
+        note_path = "projects/second-brain.md"
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def add_tag(tag):
+            try:
+                barrier.wait()
+                update_tags(note_path, add=[tag], remove=[], vault=vault)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=add_tag, args=("tag-alpha",))
+        t2 = threading.Thread(target=add_tag, args=("tag-beta",))
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        assert not errors, f"Concurrent update_tags raised: {errors}"
+        content = (vault / note_path).read_text()
+        assert "tag-alpha" in content
+        assert "tag-beta" in content
+
+    def test_concurrent_replace_section_no_data_loss(self, vault: Path) -> None:
+        """Two threads replacing different sections must both succeed."""
+        from alaya.tools.edit import replace_section
+
+        note_path = "projects/second-brain.md"
+        # ensure two sections exist
+        (vault / note_path).write_text(
+            "---\ntitle: Test\ndate: 2026-01-01\n---\n"
+            "## Alpha\noriginal alpha\n"
+            "## Beta\noriginal beta\n"
+        )
+
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def replace(section, new_content):
+            try:
+                barrier.wait()
+                replace_section(note_path, section, new_content, vault)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=replace, args=("Alpha", "new alpha content"))
+        t2 = threading.Thread(target=replace, args=("Beta", "new beta content"))
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        assert not errors, f"Concurrent replace_section raised: {errors}"
+        content = (vault / note_path).read_text()
+        assert "new alpha content" in content
+        assert "new beta content" in content

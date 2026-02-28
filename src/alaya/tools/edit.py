@@ -5,6 +5,7 @@ from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, SECTION_NOT_FOUND, ALREADY_EXISTS
 from alaya.vault import resolve_note_path
 from alaya.tools.write import create_note
+from alaya.tools._locks import get_path_lock, atomic_write
 
 
 def _parse_sections(content: str) -> list[tuple[str, int, int]]:
@@ -39,26 +40,28 @@ def replace_section(
     Raises ValueError with 'SECTION_NOT_FOUND' if the section header doesn't exist.
     """
     path = resolve_note_path(relative_path, vault)
-    if not path.exists():
-        raise FileNotFoundError(f"Note not found: {relative_path}")
 
-    content = path.read_text()
-    lines = content.splitlines()
-    sections = _parse_sections(content)
+    with get_path_lock(path):
+        if not path.exists():
+            raise FileNotFoundError(f"Note not found: {relative_path}")
 
-    match = next((s for s in sections if s[0].lower() == section.lower()), None)
-    if match is None:
-        raise ValueError(f"SECTION_NOT_FOUND: '{section}' in {relative_path}")
+        content = path.read_text()
+        lines = content.splitlines()
+        sections = _parse_sections(content)
 
-    header_text, start, end = match
+        match = next((s for s in sections if s[0].lower() == section.lower()), None)
+        if match is None:
+            raise ValueError(f"SECTION_NOT_FOUND: '{section}' in {relative_path}")
 
-    # rebuild: everything before section body + header + new content + rest
-    header_line = lines[start]
-    before = lines[:start]
-    after = lines[end:]
+        header_text, start, end = match
 
-    new_lines = before + [header_line, new_content] + ([""] if after else []) + after
-    path.write_text("\n".join(new_lines) + "\n")
+        # rebuild: everything before section body + header + new content + rest
+        header_line = lines[start]
+        before = lines[:start]
+        after = lines[end:]
+
+        new_lines = before + [header_line, new_content] + ([""] if after else []) + after
+        atomic_write(path, "\n".join(new_lines) + "\n")
 
 
 def extract_section(
