@@ -1,8 +1,6 @@
 """Search tools: search_notes (M1: zk keyword fallback; M3: LanceDB hybrid)."""
 from pathlib import Path
 
-import numpy as np
-
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
 from alaya.zk import run_zk, ZKError

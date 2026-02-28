@@ -8,7 +8,6 @@ from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT
 from alaya.vault import resolve_note_path
 
 _TODO_PATTERN = re.compile(r"^- \[ \] (.+)$")
-_DONE_PATTERN = re.compile(r"^- \[x\] (.+)$", re.IGNORECASE)
 
 
 def get_todos(

@@ -51,7 +51,7 @@ def _index_content(
     vault: Path,
 ) -> int:
     """Chunk and embed content into LanceDB. Returns number of chunks indexed."""
-    from alaya.index.embedder import chunk_note, embed_chunks, Chunk
+    from alaya.index.embedder import chunk_note, embed_chunks
     from alaya.index.store import get_store, upsert_note
 
     # build a synthetic note-like string for chunking
