@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,21 +13,39 @@ logger = logging.getLogger(__name__)
 
 _model = None
 _loaded_model_name: str | None = None  # track which model is loaded
+# Guards _model and _loaded_model_name against concurrent load by multiple threads
+# (e.g. watcher ingest thread + write-through event handler).
+_model_lock = threading.Lock()
 
 
 def get_model():
     global _model, _loaded_model_name
     cfg = get_active_model()
-    if _model is None or _loaded_model_name != cfg.name:
-        logger.info("Loading embedding model: %s", cfg.name)
-        from fastembed import TextEmbedding
-        kwargs = {}
-        if cfg.file_name:
-            kwargs["model_file"] = cfg.file_name
-        _model = TextEmbedding(cfg.name, **kwargs)
-        _loaded_model_name = cfg.name
-        logger.info("Embedding model loaded")
+    # Fast path: model already loaded and name matches — no lock needed for reads
+    # since CPython's GIL makes these reads atomic, and model identity is stable.
+    if _model is not None and _loaded_model_name == cfg.name:
+        return _model, cfg
+    # Slow path: load under lock to prevent concurrent double-initialisation.
+    with _model_lock:
+        # Re-check after acquiring the lock (double-checked locking pattern).
+        if _model is None or _loaded_model_name != cfg.name:
+            logger.info("Loading embedding model: %s", cfg.name)
+            from fastembed import TextEmbedding
+            kwargs = {}
+            if cfg.file_name:
+                kwargs["model_file"] = cfg.file_name
+            _model = TextEmbedding(cfg.name, **kwargs)
+            _loaded_model_name = cfg.name
+            logger.info("Embedding model loaded")
     return _model, cfg
+
+
+def reset_model() -> None:
+    """Clear the cached model. Intended for use in tests only."""
+    global _model, _loaded_model_name
+    with _model_lock:
+        _model = None
+        _loaded_model_name = None
 
 
 @dataclass
