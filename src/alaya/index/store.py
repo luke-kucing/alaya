@@ -23,6 +23,16 @@ def _get_dim() -> int:
     return get_active_model().dimensions
 
 
+def _sq(value: str) -> str:
+    """Escape a string for safe interpolation into a LanceDB SQL filter expression.
+
+    LanceDB does not support parameterized queries, so we centralise escaping here.
+    Standard SQL single-quote doubling is the correct approach; this helper ensures
+    it is applied consistently rather than inline at each callsite.
+    """
+    return value.replace("'", "''")
+
+
 @dataclass
 class VaultStore:
     """Thin wrapper around a LanceDB table for the vault index."""
@@ -68,10 +78,8 @@ def upsert_note(
     """Replace all chunks for `path` with the new chunks + embeddings."""
     table = store._get_table()
 
-    # delete existing rows for this path (escape single quotes per SQL standard)
-    safe_path = path.replace("'", "''")
     try:
-        table.delete(f"path = '{safe_path}'")
+        table.delete(f"path = '{_sq(path)}'")
     except _STORE_ERRORS as e:
         logger.warning("Failed to delete existing chunks for %s before upsert: %s", path, e)
 
@@ -96,10 +104,9 @@ def upsert_note(
 
 def delete_note_from_index(path: str, store: VaultStore) -> None:
     """Remove all chunks for `path` from the index."""
-    safe_path = path.replace("'", "''")
     try:
         table = store._get_table()
-        table.delete(f"path = '{safe_path}'")
+        table.delete(f"path = '{_sq(path)}'")
     except _STORE_ERRORS as e:
         logger.warning("Failed to delete %s from index: %s", path, e)
 
@@ -112,16 +119,15 @@ def update_metadata(
     store: VaultStore,
 ) -> None:
     """Update path/title/tags on all chunks for old_path without re-embedding."""
-    safe_old = old_path.replace("'", "''")
     new_directory = new_path.split("/")[0] if "/" in new_path else ""
 
     try:
         table = store._get_table()
-        existing = table.search().where(f"path = '{safe_old}'").limit(10000).to_list()
+        existing = table.search().where(f"path = '{_sq(old_path)}'").limit(10000).to_list()
         if not existing:
             return
 
-        table.delete(f"path = '{safe_old}'")
+        table.delete(f"path = '{_sq(old_path)}'")
 
         updated = []
         for row in existing:
@@ -163,13 +169,11 @@ def hybrid_search(
 
         filters = []
         if directory:
-            safe_directory = directory.replace("'", "''")
-            filters.append(f"directory = '{safe_directory}'")
+            filters.append(f"directory = '{_sq(directory)}'")
         if tags:
             for tag in tags:
-                safe_tag = tag.replace("'", "''")
                 # tags column is comma-separated; match as substring
-                filters.append(f"tags LIKE '%{safe_tag}%'")
+                filters.append(f"tags LIKE '%{_sq(tag)}%'")
         if filters:
             q = q.where(" AND ".join(filters))
 
