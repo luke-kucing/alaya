@@ -2,7 +2,6 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, SECTION_NOT_FOUND, ALREADY_EXISTS
 from alaya.vault import resolve_note_path
 from alaya.tools.write import create_note

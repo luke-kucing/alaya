@@ -3,7 +3,6 @@ import re
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT
 from alaya.vault import resolve_note_path
 

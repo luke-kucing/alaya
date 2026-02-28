@@ -2,9 +2,8 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
-from alaya.vault import resolve_note_path, parse_note, _parse_inline_tags
+from alaya.vault import resolve_note_path, parse_note
 from alaya.zk import run_zk, ZKError
 
 

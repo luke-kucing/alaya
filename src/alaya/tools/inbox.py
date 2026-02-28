@@ -3,7 +3,6 @@ from datetime import datetime
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
 from alaya.errors import error, NOT_FOUND
 
 _INBOX_FILENAME = "inbox.md"

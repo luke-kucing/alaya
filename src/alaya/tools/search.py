@@ -2,7 +2,6 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.config import get_vault_root
 from alaya.zk import run_zk, ZKError
 
 

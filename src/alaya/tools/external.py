@@ -99,8 +99,12 @@ def push_external(
     Returns the URL of the created item, or an error string.
     """
     from alaya.tools.providers import get_provider
+    from alaya.vault import resolve_note_path
 
-    path = vault / note_path
+    try:
+        path = resolve_note_path(note_path, vault)
+    except ValueError as e:
+        return f"[error] {e}"
     if not path.exists():
         return f"[error] Note not found: {note_path}"
 

@@ -102,7 +102,7 @@ def ingest(
     suggested_links. Summary generation is Claude's responsibility.
     """
     if vault is None:
-        vault = get_vault
+        vault = get_vault_root()
 
     tags = tags or []
     raw_text = ""
