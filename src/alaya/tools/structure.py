@@ -193,9 +193,3 @@ def _register(mcp: FastMCP) -> None:
         lines = [f"- `{r['path']}` ({r['type']})" for r in results]
         return "\n".join(lines)
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

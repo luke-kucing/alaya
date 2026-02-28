@@ -191,9 +191,3 @@ def _register(mcp: FastMCP) -> None:
             f"{links_section}"
         )
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

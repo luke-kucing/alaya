@@ -211,9 +211,3 @@ def _register(mcp: FastMCP) -> None:
             return result
         return f"Issue #{issue_number} → `{result}`"
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

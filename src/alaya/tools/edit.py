@@ -142,9 +142,3 @@ def _register(mcp: FastMCP) -> None:
                 return error(SECTION_NOT_FOUND, msg)
             return error(OUTSIDE_VAULT, msg)
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

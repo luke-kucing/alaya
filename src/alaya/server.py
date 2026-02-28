@@ -17,16 +17,19 @@ mcp = FastMCP(
     ),
 )
 
-# tools are registered by importing their modules
-import alaya.tools.read      # noqa: F401, E402
-import alaya.tools.write     # noqa: F401, E402
-import alaya.tools.inbox     # noqa: F401, E402
-import alaya.tools.search    # noqa: F401, E402
-import alaya.tools.structure # noqa: F401, E402
-import alaya.tools.edit      # noqa: F401, E402
-import alaya.tools.tasks     # noqa: F401, E402
-import alaya.tools.gitlab    # noqa: F401, E402
-import alaya.tools.ingest    # noqa: F401, E402
+# Explicit registration: server -> tools (one direction only).
+# Each tool module exposes _register(mcp) and has no dependency on server.py.
+from alaya.tools import read, write, inbox, search, structure, edit, tasks, gitlab, ingest  # noqa: E402
+
+read._register(mcp)
+write._register(mcp)
+inbox._register(mcp)
+search._register(mcp)
+structure._register(mcp)
+edit._register(mcp)
+tasks._register(mcp)
+gitlab._register(mcp)
+ingest._register(mcp)
 
 
 def main() -> None:

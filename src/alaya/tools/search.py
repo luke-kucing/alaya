@@ -97,9 +97,3 @@ def _register(mcp: FastMCP) -> None:
         """Search notes by keyword or semantic query. Optionally restrict to a directory."""
         return search_notes(query, vault_root(), directory=directory or None, limit=limit)
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

@@ -172,9 +172,3 @@ def _register(mcp: FastMCP) -> None:
         """Rebuild the full LanceDB vector index. Requires confirm=True."""
         return reindex_vault(vault_root(), confirm=confirm)
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass

@@ -100,9 +100,3 @@ def _register(mcp: FastMCP) -> None:
         except ValueError as e:
             return error(NOT_FOUND, str(e))
 
-
-try:
-    from alaya.server import mcp as _mcp
-    _register(_mcp)
-except ImportError:
-    pass
