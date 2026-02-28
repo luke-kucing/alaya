@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.tools import read, write, inbox, search, structure, edit, tasks, gitlab, ingest
+from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_all_expected_tools_registered(vault: Path) -> None:
     structure._register(test_mcp, vault)
     edit._register(test_mcp, vault)
     tasks._register(test_mcp, vault)
-    gitlab._register(test_mcp, vault)
+    external._register(test_mcp, vault)
     ingest._register(test_mcp, vault)
 
     registered = {t.name for t in await test_mcp.list_tools()}
@@ -43,6 +43,8 @@ async def test_all_expected_tools_registered(vault: Path) -> None:
         "extract_section_tool",
         "get_todos_tool",
         "complete_todo_tool",
+        "pull_external_tool",
+        "push_external_tool",
         "ingest_tool",
     }
     missing = expected - registered
