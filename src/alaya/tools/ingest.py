@@ -9,7 +9,10 @@ from fastmcp import FastMCP
 from alaya.config import get_vault_root
 
 _INGESTIBLE_SUFFIXES = {".pdf", ".md", ".txt"}
-_SCANNED_PDF_MIN_CHARS = 100
+# Minimum extracted characters before a PDF is considered scanned.
+# 250 chars is conservative (~2 short sentences) and avoids false-positives
+# on sparse-but-valid PDFs like slide decks or cover pages.
+_SCANNED_PDF_MIN_CHARS = 250
 
 
 @dataclass
@@ -144,13 +147,14 @@ def ingest(
 
         if suffix == ".pdf":
             raw_text = _extract_pdf(str(path))
-            if len(raw_text.strip()) < _SCANNED_PDF_MIN_CHARS:
+            extracted_chars = len(raw_text.strip())
+            if extracted_chars < _SCANNED_PDF_MIN_CHARS:
                 return IngestResult(
                     title=resolved_title,
                     source=source,
                     raw_text=(
-                        "This PDF appears to be scanned. OCR is not supported — "
-                        "consider copy-pasting the text manually."
+                        f"This PDF appears to be scanned ({extracted_chars} chars extracted). "
+                        "OCR is not supported — consider copy-pasting the text manually."
                     ),
                     chunks_indexed=0,
                 )
