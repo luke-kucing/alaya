@@ -1,1 +1,87 @@
-# Tools: capture_to_inbox, get_inbox, clear_inbox_item
+"""Inbox tools: capture_to_inbox, get_inbox, clear_inbox_item."""
+from datetime import datetime
+from pathlib import Path
+
+from fastmcp import FastMCP
+from alaya.config import get_vault_root
+
+_INBOX_FILENAME = "inbox.md"
+
+
+def _inbox_path(vault: Path) -> Path:
+    return vault / _INBOX_FILENAME
+
+
+def capture_to_inbox(text: str, vault: Path) -> str:
+    """Append a timestamped entry to inbox.md and return a confirmation string."""
+    inbox = _inbox_path(vault)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = f"- {timestamp} {text}"
+
+    existing = inbox.read_text() if inbox.exists() else "# Inbox\n\nQuick capture. Process weekly.\n"
+    separator = "\n" if existing.endswith("\n") else "\n"
+    inbox.write_text(existing + separator + entry + "\n")
+
+    return f"Captured: {entry}"
+
+
+def get_inbox(vault: Path) -> str:
+    """Return the contents of inbox.md."""
+    inbox = _inbox_path(vault)
+    if not inbox.exists():
+        return "Inbox is empty."
+
+    content = inbox.read_text().strip()
+
+    # collect bullet items
+    items = [l for l in content.splitlines() if l.strip().startswith("- ")]
+    if not items:
+        return "Inbox is empty. No items to process."
+
+    return content
+
+
+def clear_inbox_item(text: str, vault: Path) -> None:
+    """Remove the first inbox line containing `text`.
+
+    Raises ValueError if no matching line is found.
+    """
+    inbox = _inbox_path(vault)
+    lines = inbox.read_text().splitlines(keepends=True)
+
+    for i, line in enumerate(lines):
+        if text in line:
+            lines.pop(i)
+            inbox.write_text("".join(lines))
+            return
+
+    raise ValueError(f"Inbox item not found: '{text}'")
+
+
+# --- FastMCP tool registration ---
+
+def _register(mcp: FastMCP) -> None:
+    vault_root = get_vault_root
+
+    @mcp.tool()
+    def capture_to_inbox_tool(text: str) -> str:
+        """Capture a quick note to inbox.md with a timestamp."""
+        return capture_to_inbox(text, vault_root())
+
+    @mcp.tool()
+    def get_inbox_tool() -> str:
+        """Return the current inbox contents."""
+        return get_inbox(vault_root())
+
+    @mcp.tool()
+    def clear_inbox_item_tool(text: str) -> str:
+        """Remove an inbox item by matching text."""
+        clear_inbox_item(text, vault_root())
+        return f"Removed inbox item: '{text}'"
+
+
+try:
+    from alaya.server import mcp as _mcp
+    _register(_mcp)
+except ImportError:
+    pass
