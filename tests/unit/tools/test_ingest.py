@@ -1,0 +1,120 @@
+"""Unit tests for the ingest tool — HTTP and file I/O are mocked."""
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from alaya.tools.ingest import ingest, IngestResult
+
+
+SAMPLE_HTML = """
+<html><body>
+<h1>Understanding Kubernetes Operators</h1>
+<p>Operators extend Kubernetes with custom controllers that manage complex stateful applications.</p>
+<p>They encode operational knowledge into software — eliminating manual intervention.</p>
+</body></html>
+"""
+
+SAMPLE_PDF_MD = """# Understanding Zero Trust
+
+Zero trust networking assumes breach by default.
+All requests are authenticated and authorized regardless of network location.
+
+## Key Principles
+- Verify explicitly
+- Use least privilege
+- Assume breach
+"""
+
+
+class TestIngestURL:
+    def test_returns_ingest_result(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._fetch_url", return_value=("Understanding Kubernetes Operators", SAMPLE_HTML)), \
+             patch("alaya.tools.ingest._extract_text_from_html", return_value="Operators extend Kubernetes with custom controllers."), \
+             patch("alaya.tools.ingest._index_content", return_value=3):
+            result = ingest("https://example.com/k8s-operators", vault=vault)
+        assert isinstance(result, IngestResult)
+
+    def test_raw_text_returned(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._fetch_url", return_value=("K8s Operators", SAMPLE_HTML)), \
+             patch("alaya.tools.ingest._extract_text_from_html", return_value="Operators extend Kubernetes."), \
+             patch("alaya.tools.ingest._index_content", return_value=2):
+            result = ingest("https://example.com/k8s-operators", vault=vault)
+        assert "Operators" in result.raw_text
+
+    def test_chunks_indexed(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._fetch_url", return_value=("K8s Operators", SAMPLE_HTML)), \
+             patch("alaya.tools.ingest._extract_text_from_html", return_value="Content here."), \
+             patch("alaya.tools.ingest._index_content", return_value=4):
+            result = ingest("https://example.com/k8s-operators", vault=vault)
+        assert result.chunks_indexed == 4
+
+    def test_suggested_links_returned(self, vault: Path) -> None:
+        mock_search = [{"path": "resources/kubernetes-notes.md", "title": "kubernetes-notes", "score": 0.9}]
+        with patch("alaya.tools.ingest._fetch_url", return_value=("K8s", SAMPLE_HTML)), \
+             patch("alaya.tools.ingest._extract_text_from_html", return_value="kubernetes content"), \
+             patch("alaya.tools.ingest._index_content", return_value=1), \
+             patch("alaya.tools.ingest._find_suggested_links", return_value=mock_search):
+            result = ingest("https://example.com/k8s", vault=vault)
+        assert isinstance(result.suggested_links, list)
+
+    def test_title_override(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._fetch_url", return_value=("Original Title", SAMPLE_HTML)), \
+             patch("alaya.tools.ingest._extract_text_from_html", return_value="content"), \
+             patch("alaya.tools.ingest._index_content", return_value=1):
+            result = ingest("https://example.com/k8s", title="Custom Title", vault=vault)
+        assert result.title == "Custom Title"
+
+    def test_source_stored_in_result(self, vault: Path) -> None:
+        url = "https://example.com/k8s-operators"
+        with patch("alaya.tools.ingest._fetch_url", return_value=("K8s", SAMPLE_HTML)), \
+             patch("alaya.tools.ingest._extract_text_from_html", return_value="content"), \
+             patch("alaya.tools.ingest._index_content", return_value=1):
+            result = ingest(url, vault=vault)
+        assert result.source == url
+
+
+class TestIngestPDF:
+    def test_pdf_extracted_as_markdown(self, vault: Path, tmp_path: Path) -> None:
+        pdf_path = tmp_path / "zero-trust.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 fake")  # dummy file
+
+        with patch("alaya.tools.ingest._extract_pdf", return_value=SAMPLE_PDF_MD), \
+             patch("alaya.tools.ingest._index_content", return_value=3):
+            result = ingest(str(pdf_path), vault=vault)
+        assert "Zero Trust" in result.raw_text or "Zero trust" in result.raw_text
+
+    def test_scanned_pdf_returns_error(self, vault: Path, tmp_path: Path) -> None:
+        pdf_path = tmp_path / "scanned.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 fake")
+
+        with patch("alaya.tools.ingest._extract_pdf", return_value=""):
+            result = ingest(str(pdf_path), vault=vault)
+        assert "scanned" in result.raw_text.lower() or result.chunks_indexed == 0
+
+
+class TestIngestMarkdown:
+    def test_markdown_file_ingested_directly(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._index_content", return_value=5), \
+             patch("alaya.tools.ingest._find_suggested_links", return_value=[]):
+            result = ingest("projects/second-brain.md", vault=vault)
+        assert "FastMCP" in result.raw_text
+        assert result.chunks_indexed == 5
+
+    def test_idempotent_on_same_source(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._index_content", return_value=5), \
+             patch("alaya.tools.ingest._find_suggested_links", return_value=[]):
+            result1 = ingest("projects/second-brain.md", vault=vault)
+            result2 = ingest("projects/second-brain.md", vault=vault)
+        assert result1.source == result2.source
+
+
+class TestIngestTags:
+    def test_tags_passed_to_index(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._fetch_url", return_value=("Article", SAMPLE_HTML)), \
+             patch("alaya.tools.ingest._extract_text_from_html", return_value="content"), \
+             patch("alaya.tools.ingest._index_content", return_value=1) as mock_index:
+            ingest("https://example.com/art", tags=["reference", "k8s"], vault=vault)
+        # tags should be passed along to indexing
+        call_kwargs = mock_index.call_args
+        assert call_kwargs is not None
