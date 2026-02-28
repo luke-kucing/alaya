@@ -29,8 +29,7 @@ A FastMCP server that makes Claude Code the primary interface for a `zk`-managed
 │  │ tools/      │ │ tools/      │ │ tools/         │  │
 │  │  read.py    │ │  write.py   │ │  search.py     │  │
 │  │  inbox.py   │ │  edit.py    │ │  structure.py  │  │
-│  │  tasks.py   │ │  ingest.py  │ │  gitlab.py     │  │
-│  │             │ │             │ │  github.py     │  │
+│  │  tasks.py   │ │  ingest.py  │ │  external.py   │  │
 │  └──────┬──────┘ └──────┬──────┘ └───────┬────────┘  │
 │         │               │                │            │
 │  ┌──────▼───────────────▼────────────────▼─────────┐  │
@@ -40,18 +39,18 @@ A FastMCP server that makes Claude Code the primary interface for a `zk`-managed
 │  └──────────────────┬──────────────────────────────┘  │
 │                     │                                 │
 │  ┌──────────────────▼──────────────────────────────┐  │
-│  │              index/                              │  │
-│  │  embedder.py  (chunk + embed via nomic ONNX)    │  │
-│  │  store.py     (LanceDB upsert/search)           │  │
-│  │  reindex.py   (full vault rebuild)              │  │
+│  │              index/          providers/          │  │
+│  │  embedder.py (nomic ONNX)    gitlab.py (glab)   │  │
+│  │  store.py    (LanceDB)       github.py (gh)     │  │
+│  │  reindex.py  (rebuild)       outline.py (API)   │  │
 │  └──────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────┘
          │                              │
-    ┌────▼─────┐          ┌──────▼──────┐  ┌─────────────┐
-    │  zk CLI  │          │   glab CLI  │  │   gh CLI    │
-    │ (notes,  │          │  (GitLab    │  │  (GitHub    │
-    │  links,  │          │   issues)   │  │   issues)   │
-    │  tags)   │          └─────────────┘  └─────────────┘
+    ┌────▼─────┐    ┌──────────────────▼──────────────┐
+    │  zk CLI  │    │  External providers              │
+    │ (notes,  │    │  glab CLI · gh CLI · Outline API │
+    │  links,  │    │  (pull issues in, push ideas out)│
+    │  tags)   │    └──────────────────────────────────┘
     └────┬─────┘
          │
     ┌────▼──────────────────────┐
@@ -83,6 +82,8 @@ A FastMCP server that makes Claude Code the primary interface for a `zk`-managed
 
 **Confirmation lives in Claude, not the server.** The server executes; Claude proposes and waits for user approval on destructive ops.
 
+**External systems are bridges, not mirrors.** The vault doesn't replicate GitLab/GitHub/Outline — it pulls context in and pushes ideas out. Issue CRUD (list, close, update) is Claude's native territory via CLI. The MCP server only handles the vault-to-provider bridge (`pull_external`, `push_external`).
+
 ## Tools
 
 | Tool | Purpose |
@@ -108,11 +109,11 @@ A FastMCP server that makes Claude Code the primary interface for a `zk`-managed
 | `get_todos` | Find all `- [ ]` tasks across the vault |
 | `complete_todo` | Mark a task complete (fuzzy line fallback) |
 | `reindex_vault` | Full LanceDB rebuild (requires confirm) |
-| `create_issue` | Create an issue on GitLab or GitHub |
-| `get_issues` | List open issues from GitLab or GitHub |
-| `close_issue` | Close an issue (requires confirm) |
-| `issue_to_note` | Pull an issue into the vault as a note |
+| `pull_external` | Pull issues/docs from GitLab, GitHub, or Outline into the vault |
+| `push_external` | Push a vault note to an external provider as an issue/doc |
 | `ingest` | Ingest a URL, PDF, or markdown file into LanceDB |
+
+External issue CRUD (list, close, update) is handled by Claude Code natively via `glab`/`gh` CLI — the MCP server only bridges the vault to external systems.
 
 ## Vault structure
 
@@ -147,15 +148,15 @@ Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links 
 | Web extraction | trafilatura |
 | File watching | watchdog |
 | HTTP client | httpx |
-| Issue tracking | glab CLI (GitLab) / gh CLI (GitHub) |
+| External bridge | glab CLI (GitLab) / gh CLI (GitHub) / Outline API |
 
 ## Setup
 
 ### Prerequisites
 
 - [zk](https://github.com/zk-org/zk) — `brew install zk`
-- [glab](https://gitlab.com/gitlab-org/cli) — `brew install glab` (optional, for GitLab integration)
-- [gh](https://cli.github.com/) — `brew install gh` (optional, for GitHub integration)
+- [glab](https://gitlab.com/gitlab-org/cli) — `brew install glab` (optional, for GitLab bridge)
+- [gh](https://cli.github.com/) — `brew install gh` (optional, for GitHub bridge)
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
 
@@ -177,13 +178,14 @@ cp .env.example .env
 | Variable | Required | Description |
 |---|---|---|
 | `ZK_NOTEBOOK_DIR` | Yes | Path to your zk vault (e.g. `~/notes`) |
-| `ISSUE_BACKEND` | No | `gitlab` or `github` (default: auto-detected from env vars) |
-| `GITLAB_PROJECT` | No | GitLab project path (e.g. `myorg/myrepo`) |
+| `GITLAB_PROJECT` | No | GitLab project path — enables GitLab provider |
 | `GITLAB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
-| `GITHUB_REPO` | No | GitHub repo (e.g. `owner/repo`) |
+| `GITHUB_REPO` | No | GitHub repo (e.g. `owner/repo`) — enables GitHub provider |
 | `GITHUB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
+| `OUTLINE_URL` | No | Outline instance URL — enables Outline provider |
+| `OUTLINE_API_KEY` | No | Outline API key |
 
-Configure **one** of `GITLAB_PROJECT` or `GITHUB_REPO`. If both are set, `ISSUE_BACKEND` determines which is used.
+Configure any combination of providers. `pull_external` and `push_external` auto-detect the provider from URLs or use the configured defaults.
 
 ### Run
 
@@ -241,9 +243,12 @@ src/alaya/
 │   ├── structure.py    # move, rename, delete, find_references
 │   ├── edit.py         # replace_section, extract_section
 │   ├── tasks.py        # get_todos, complete_todo
-│   ├── gitlab.py       # GitLab issue CRUD via glab
-│   ├── github.py       # GitHub issue CRUD via gh
+│   ├── external.py     # pull_external, push_external (provider-agnostic)
 │   └── ingest.py       # URL/PDF/markdown ingestion
+├── providers/
+│   ├── gitlab.py       # glab CLI wrapper
+│   ├── github.py       # gh CLI wrapper
+│   └── outline.py      # Outline API via httpx
 └── index/
     ├── embedder.py     # chunk notes by section, embed via nomic ONNX
     ├── store.py        # LanceDB table management, hybrid search
