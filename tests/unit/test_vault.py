@@ -63,6 +63,29 @@ class TestParseNote:
         assert "---" in note.body
 
 
+class TestParseInlineTagsBounds:
+    def test_long_line_returns_empty(self):
+        from alaya.vault import _parse_inline_tags, _MAX_TAG_LINE_LEN
+        long_line = ("#tag " * (_MAX_TAG_LINE_LEN // 5 + 10)).strip()
+        assert len(long_line) > _MAX_TAG_LINE_LEN
+        assert _parse_inline_tags(long_line) == []
+
+    def test_tag_count_capped_at_max(self):
+        from alaya.vault import _parse_inline_tags, _MAX_TAGS
+        # build a line with exactly MAX_TAGS + 5 short tags, under 500 chars
+        tags = " ".join(f"#t{i}" for i in range(_MAX_TAGS + 5))
+        result = _parse_inline_tags(tags)
+        assert len(result) == _MAX_TAGS
+
+    def test_normal_tags_still_parsed(self):
+        from alaya.vault import _parse_inline_tags
+        assert _parse_inline_tags("#python #fastmcp #notes") == ["python", "fastmcp", "notes"]
+
+    def test_line_with_non_tag_content_returns_empty(self):
+        from alaya.vault import _parse_inline_tags
+        assert _parse_inline_tags("This is a sentence, not tags.") == []
+
+
 class TestRenderFrontmatter:
     def test_basic(self):
         meta = {"title": "My Note", "date": "2026-01-01"}
