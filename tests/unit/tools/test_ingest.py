@@ -19,11 +19,12 @@ SAMPLE_PDF_MD = """# Understanding Zero Trust
 
 Zero trust networking assumes breach by default.
 All requests are authenticated and authorized regardless of network location.
+Every connection is treated as hostile until verified, eliminating implicit trust.
 
 ## Key Principles
 - Verify explicitly
-- Use least privilege
-- Assume breach
+- Use least privilege access
+- Assume breach at all times
 """
 
 
@@ -91,6 +92,28 @@ class TestIngestPDF:
         with patch("alaya.tools.ingest._extract_pdf", return_value=""):
             result = ingest(str(pdf_path), vault=vault)
         assert "scanned" in result.raw_text.lower() or result.chunks_indexed == 0
+
+    def test_scanned_pdf_message_includes_char_count(self, vault: Path, tmp_path: Path) -> None:
+        pdf_path = tmp_path / "sparse.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 fake")
+
+        with patch("alaya.tools.ingest._extract_pdf", return_value="short"):
+            result = ingest(str(pdf_path), vault=vault)
+        assert "5 chars extracted" in result.raw_text
+
+    def test_pdf_with_sufficient_text_is_not_flagged_as_scanned(self, vault: Path, tmp_path: Path) -> None:
+        pdf_path = tmp_path / "real.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4 fake")
+        # 120 chars — old threshold (100) would pass, but was too low.
+        # New threshold is 250, so this should still be flagged.
+        # Use > 250 chars to confirm a legitimate PDF is accepted.
+        sufficient_text = "A" * 300
+
+        with patch("alaya.tools.ingest._extract_pdf", return_value=sufficient_text), \
+             patch("alaya.tools.ingest._index_content", return_value=3):
+            result = ingest(str(pdf_path), vault=vault)
+        assert result.chunks_indexed == 3
+        assert "scanned" not in result.raw_text.lower()
 
 
 class TestIngestMarkdown:
