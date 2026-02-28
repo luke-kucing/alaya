@@ -64,6 +64,9 @@ def create_note(
     if body:
         content_parts.append(body)
 
+    if file_path.exists():
+        raise FileExistsError(f"Note already exists: {file_path.relative_to(vault)}")
+
     file_path.write_text("\n".join(content_parts) + "\n")
 
     return str(file_path.relative_to(vault))

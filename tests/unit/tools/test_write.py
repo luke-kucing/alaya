@@ -75,6 +75,11 @@ class TestCreateNote:
         assert isinstance(path, str)
         assert not path.startswith("/")
 
+    def test_duplicate_raises_file_exists_error(self, vault: Path) -> None:
+        create_note(title="dupe note", directory="ideas", tags=[], body="original", vault=vault)
+        with pytest.raises(FileExistsError, match="already exists"):
+            create_note(title="dupe note", directory="ideas", tags=[], body="overwrite attempt", vault=vault)
+
 
 class TestAppendToNote:
     def test_appends_text_to_existing_note(self, vault: Path) -> None:
