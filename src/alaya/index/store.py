@@ -1,12 +1,15 @@
 """LanceDB store: upsert_note, delete_note_from_index, hybrid_search."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pyarrow as pa
+
+logger = logging.getLogger(__name__)
 
 _TABLE_NAME = "notes"
 _DIM = 768
@@ -64,8 +67,8 @@ def upsert_note(
     safe_path = path.replace("'", "''")
     try:
         table.delete(f"path = '{safe_path}'")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to delete existing chunks for %s before upsert: %s", path, e)
 
     if not chunks:
         return
@@ -92,8 +95,8 @@ def delete_note_from_index(path: str, store: VaultStore) -> None:
     try:
         table = store._get_table()
         table.delete(f"path = '{safe_path}'")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to delete %s from index: %s", path, e)
 
 
 def hybrid_search(
@@ -142,7 +145,8 @@ def hybrid_search(
 
         return output
 
-    except Exception:
+    except Exception as e:
+        logger.warning("hybrid_search failed for query %r: %s", query, e)
         return []
 
 

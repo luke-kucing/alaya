@@ -1,8 +1,11 @@
 """Watchdog file watcher: debounce vault changes, sync LanceDB, trigger raw/ ingestion."""
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -57,8 +60,8 @@ class VaultEventHandler(FileSystemEventHandler):
             chunks = chunk_note(rel, content)
             embeddings = embed_chunks(chunks)
             upsert_note(rel, chunks, embeddings, self.store)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to upsert %s into index: %s", src_path, e)
 
     def on_created(self, event) -> None:
         if event.is_directory:
@@ -102,8 +105,8 @@ class VaultEventHandler(FileSystemEventHandler):
         def _run():
             try:
                 ingest(src_path, vault=self.vault)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to ingest %s: %s", src_path, e)
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()

@@ -90,3 +90,25 @@ class TestVaultEventHandler:
         with patch("alaya.watcher.upsert_note") as mock_upsert:
             handler.on_created(event)
             mock_upsert.assert_not_called()
+
+    def test_upsert_error_is_logged_not_raised(self, vault: Path) -> None:
+        handler = self._make_handler(vault)
+        src_path = str(vault / "projects/second-brain.md")
+
+        with patch("alaya.watcher.chunk_note", side_effect=RuntimeError("embed failed")), \
+             patch("alaya.watcher.logger") as mock_log:
+            # Must not raise — watcher must stay alive
+            handler._do_upsert(src_path)
+            mock_log.warning.assert_called_once()
+
+    def test_ingest_error_is_logged_not_raised(self, vault: Path) -> None:
+        handler = self._make_handler(vault)
+        src_path = str(vault / "raw/broken.pdf")
+        (vault / "raw").mkdir(exist_ok=True)
+        (vault / "raw/broken.pdf").write_bytes(b"bad")
+
+        with patch("alaya.watcher.ingest", side_effect=RuntimeError("parse failed")), \
+             patch("alaya.watcher.logger") as mock_log:
+            handler._trigger_ingest(src_path)
+            import time; time.sleep(0.1)
+            mock_log.warning.assert_called_once()
