@@ -158,6 +158,17 @@ def hybrid_search(
         return []
 
 
+_store_cache: dict[Path, VaultStore] = {}
+
+
 def get_store(vault: Path) -> VaultStore:
-    """Return the VaultStore for a given vault root."""
-    return VaultStore(db_path=vault / ".zk" / "vectors")
+    """Return the VaultStore for a given vault root, creating it once per process."""
+    resolved = vault.resolve()
+    if resolved not in _store_cache:
+        _store_cache[resolved] = VaultStore(db_path=resolved / ".zk" / "vectors")
+    return _store_cache[resolved]
+
+
+def reset_store() -> None:
+    """Clear the store cache. Intended for use in tests only."""
+    _store_cache.clear()

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from alaya.index.embedder import Chunk, chunk_note
-from alaya.index.store import upsert_note, delete_note_from_index, hybrid_search, VaultStore
+from alaya.index.store import upsert_note, delete_note_from_index, hybrid_search, VaultStore, get_store, reset_store
 
 
 def _make_chunks(path: str, text: str = "Some content about kubernetes and helm.") -> list[Chunk]:
@@ -140,3 +140,28 @@ class TestHybridSearch:
         # every result should come from the kubernetes note (tag filter applied)
         for r in results:
             assert "kubernetes" in r["path"]
+
+
+class TestGetStore:
+    def test_returns_same_instance_for_same_vault(self, tmp_path: Path) -> None:
+        reset_store()
+        s1 = get_store(tmp_path)
+        s2 = get_store(tmp_path)
+        assert s1 is s2
+
+    def test_returns_different_instance_for_different_vault(self, tmp_path: Path) -> None:
+        reset_store()
+        vault_a = tmp_path / "vault_a"
+        vault_b = tmp_path / "vault_b"
+        vault_a.mkdir()
+        vault_b.mkdir()
+        s1 = get_store(vault_a)
+        s2 = get_store(vault_b)
+        assert s1 is not s2
+
+    def test_reset_store_clears_cache(self, tmp_path: Path) -> None:
+        reset_store()
+        s1 = get_store(tmp_path)
+        reset_store()
+        s2 = get_store(tmp_path)
+        assert s1 is not s2
