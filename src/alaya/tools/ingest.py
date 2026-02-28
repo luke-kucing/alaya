@@ -81,7 +81,9 @@ def _find_suggested_links(text: str, vault: Path, limit: int = 5) -> list[dict]:
         import numpy as np
 
         model = _get_model()
-        embedding = model.encode([f"search_query: {text[:512]}"], normalize_embeddings=True)[0]
+        raw = np.array(list(model.query_embed([f"search_query: {text[:512]}"])))
+        norm = np.linalg.norm(raw[0])
+        embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
         store = get_store(vault)
         return hybrid_search(text[:200], embedding, store, limit=limit)
     except Exception:

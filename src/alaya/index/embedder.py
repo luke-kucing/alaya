@@ -1,4 +1,4 @@
-"""Embedder: chunk notes by section, embed with nomic-embed-text-v1.5 (ONNX)."""
+"""Embedder: chunk notes by section, embed with nomic-embed-text-v1.5 (fastembed)."""
 from __future__ import annotations
 
 import logging
@@ -18,8 +18,8 @@ def _get_model():
     global _model
     if _model is None:
         logger.info("Loading embedding model: %s", _MODEL_NAME)
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer(_MODEL_NAME, backend="onnx", trust_remote_code=True)
+        from fastembed import TextEmbedding
+        _model = TextEmbedding(_MODEL_NAME)
         logger.info("Embedding model loaded")
     return _model
 
@@ -130,8 +130,11 @@ def chunk_note(path: str, content: str) -> list[Chunk]:
 
 
 def embed_chunks(chunks: list[Chunk]) -> list[np.ndarray]:
-    """Embed a list of chunks. Returns one ndarray per chunk."""
+    """Embed a list of chunks. Returns one normalized float32 ndarray per chunk."""
     model = _get_model()
+    # nomic-embed requires a task prefix; "search_document:" for indexed content
     texts = [f"search_document: {c.text}" for c in chunks]
-    embeddings = model.encode(texts, normalize_embeddings=True)
-    return [embeddings[i] for i in range(len(chunks))]
+    raw = np.array(list(model.embed(texts)))
+    norms = np.linalg.norm(raw, axis=1, keepdims=True)
+    normalized = (raw / np.where(norms == 0, 1, norms)).astype(np.float32)
+    return [normalized[i] for i in range(len(chunks))]

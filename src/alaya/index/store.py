@@ -31,20 +31,17 @@ class VaultStore:
     def _get_table(self) -> Any:
         if self._table is None:
             db = self._connect()
-            if _TABLE_NAME in db.list_tables():
-                self._table = db.open_table(_TABLE_NAME)
-            else:
-                schema = pa.schema([
-                    pa.field("path", pa.string()),
-                    pa.field("title", pa.string()),
-                    pa.field("directory", pa.string()),
-                    pa.field("tags", pa.string()),  # comma-separated
-                    pa.field("modified_date", pa.string()),
-                    pa.field("chunk_index", pa.int32()),
-                    pa.field("text", pa.string()),
-                    pa.field("vector", pa.list_(pa.float32(), _DIM)),
-                ])
-                self._table = db.create_table(_TABLE_NAME, schema=schema)
+            schema = pa.schema([
+                pa.field("path", pa.string()),
+                pa.field("title", pa.string()),
+                pa.field("directory", pa.string()),
+                pa.field("tags", pa.string()),  # comma-separated
+                pa.field("modified_date", pa.string()),
+                pa.field("chunk_index", pa.int32()),
+                pa.field("text", pa.string()),
+                pa.field("vector", pa.list_(pa.float32(), _DIM)),
+            ])
+            self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
         return self._table
 
     def count(self) -> int:
@@ -131,27 +128,30 @@ def hybrid_search(
         if filters:
             q = q.where(" AND ".join(filters))
 
-        results = q.limit(limit).to_list()
+        # fetch more candidates than limit to allow deduplication by path
+        results = q.limit(limit * 4).to_list()
 
-        output = []
+        # score each chunk, then keep best chunk per path (dedup)
+        seen: dict[str, dict] = {}
         for row in results:
-            # keyword re-rank: boost if query terms appear in text
             text = row.get("text", "").lower()
             keyword_boost = sum(1 for term in query.lower().split() if term in text)
             score = float(row.get("_distance", 1.0))
-            # convert distance to similarity (lower distance = higher score)
             similarity = max(0.0, 1.0 - score)
             final_score = min(1.0, similarity + keyword_boost * 0.05)
 
-            output.append({
-                "path": row["path"],
-                "title": row["title"],
-                "directory": row["directory"],
-                "score": round(final_score, 3),
-                "text": row["text"],
-            })
+            path = row["path"]
+            if path not in seen or final_score > seen[path]["score"]:
+                seen[path] = {
+                    "path": path,
+                    "title": row["title"],
+                    "directory": row["directory"],
+                    "score": round(final_score, 3),
+                    "text": row["text"],
+                }
 
-        return output
+        output = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
+        return output[:limit]
 
     except Exception as e:
         logger.warning("hybrid_search failed for query %r: %s", query, e)

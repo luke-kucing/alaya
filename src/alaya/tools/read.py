@@ -111,7 +111,7 @@ def list_notes(
     if since and recent is not None:
         raise ValueError("since and recent are exclusive — use one or the other, not both")
 
-    args = ["list", "--format", "{{path}}\t{{title}}\t{{date}}\t{{tags}}", "--limit", str(limit)]
+    args = ["list", "--format", "{{path}}\t{{title}}\t{{format-date created '%Y-%m-%d'}}\t{{tags}}", "--limit", str(limit)]
 
     if tag:
         args += ["--tag", tag]

@@ -27,10 +27,11 @@ def _run_hybrid_search(
     from alaya.index.embedder import _get_model
     from alaya.index.store import get_store, hybrid_search
 
+    import numpy as np
     model = _get_model()
-    query_embedding = model.encode(
-        [f"search_query: {query}"], normalize_embeddings=True
-    )[0]
+    raw = np.array(list(model.query_embed([f"search_query: {query}"])))
+    norm = np.linalg.norm(raw[0])
+    query_embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
 
     store = get_store(vault)
     return hybrid_search(query, query_embedding, store, directory=directory, tags=tags, limit=limit)
@@ -64,7 +65,7 @@ def search_notes(
     args = [
         "list",
         "--match", query,
-        "--format", "{{path}}\t{{title}}\t{{date}}",
+        "--format", "{{path}}\t{{title}}\t{{format-date created '%Y-%m-%d'}}",
         "--limit", str(limit),
     ]
     if directory:
