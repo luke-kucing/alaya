@@ -13,7 +13,13 @@ class GitHubError(Exception):
 
 
 def _run_gh(args: list[str], timeout: int = 30) -> str:
-    result = subprocess.run(["gh"] + args, capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run(["gh"] + args, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise GitHubError(
+            "gh CLI not found. Install with: brew install gh (https://cli.github.com). "
+            "Alternatively, use the GitHub API directly."
+        )
     if result.returncode != 0:
         raise GitHubError(result.stderr.strip() or f"gh exited with {result.returncode}")
     return result.stdout.strip()
