@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
+from alaya.errors import error, NOT_FOUND
 
 _INBOX_FILENAME = "inbox.md"
 
@@ -76,8 +77,11 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def clear_inbox_item_tool(text: str) -> str:
         """Remove an inbox item by matching text."""
-        clear_inbox_item(text, vault_root())
-        return f"Removed inbox item: '{text}'"
+        try:
+            clear_inbox_item(text, vault_root())
+            return f"Removed inbox item: '{text}'"
+        except ValueError as e:
+            return error(NOT_FOUND, str(e))
 
 
 try:

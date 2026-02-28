@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
+from alaya.errors import error, NOT_FOUND, ALREADY_EXISTS, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.vault import resolve_note_path
 
 # Directories considered valid targets for note creation
@@ -152,19 +153,34 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def create_note_tool(title: str, directory: str, tags: list[str], body: str = "") -> str:
         """Create a new note. Returns the relative path of the created file."""
-        return create_note(title, directory, tags, body, vault_root())
+        try:
+            return create_note(title, directory, tags, body, vault_root())
+        except FileExistsError as e:
+            return error(ALREADY_EXISTS, str(e))
+        except ValueError as e:
+            return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
     def append_to_note_tool(path: str, text: str) -> str:
         """Append text to an existing note."""
-        append_to_note(path, text, vault_root())
-        return f"Appended to `{path}`."
+        try:
+            append_to_note(path, text, vault_root())
+            return f"Appended to `{path}`."
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
     def update_tags_tool(path: str, add: list[str], remove: list[str]) -> str:
         """Add or remove tags on an existing note."""
-        update_tags(path, add, remove, vault_root())
-        return f"Tags updated on `{path}`."
+        try:
+            update_tags(path, add, remove, vault_root())
+            return f"Tags updated on `{path}`."
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
 
 try:

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.vault import resolve_note_path
 from alaya.tools.write import _validate_directory, _slugify
 
@@ -156,17 +157,32 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def move_note_tool(path: str, destination: str) -> str:
         """Move a note to a different directory. Returns the new path."""
-        return move_note(path, destination, vault_root())
+        try:
+            return move_note(path, destination, vault_root())
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
     def rename_note_tool(path: str, new_title: str) -> str:
         """Rename a note and update all wikilinks referencing it. Returns the new path."""
-        return rename_note(path, new_title, vault_root())
+        try:
+            return rename_note(path, new_title, vault_root())
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
     def delete_note_tool(path: str, reason: str = "") -> str:
         """Soft-delete a note by moving it to archives/."""
-        return delete_note(path, vault_root(), reason=reason or None)
+        try:
+            return delete_note(path, vault_root(), reason=reason or None)
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
     def find_references_tool(title: str, include_text_mentions: bool = False) -> str:

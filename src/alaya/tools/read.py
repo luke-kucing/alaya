@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT
 from alaya.vault import resolve_note_path
 from alaya.zk import run_zk, ZKError
 
@@ -134,7 +135,12 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def get_note_tool(path: str) -> str:
         """Read the full content of a note by its relative path (e.g. 'projects/second-brain.md')."""
-        return get_note(path, vault_root())
+        try:
+            return get_note(path, vault_root())
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
     def list_notes_tool(directory: str = "", tag: str = "", limit: int = 50) -> str:

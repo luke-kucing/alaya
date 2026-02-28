@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT
 from alaya.vault import resolve_note_path
 
 _TODO_PATTERN = re.compile(r"^- \[ \] (.+)$")
@@ -87,8 +88,13 @@ def _register(mcp: FastMCP) -> None:
     @mcp.tool()
     def complete_todo_tool(path: str, line: int, task_text: str) -> str:
         """Mark a task as complete. Uses fuzzy fallback if line number is stale."""
-        complete_todo(path, line, task_text, vault_root())
-        return f"Completed: '{task_text}'"
+        try:
+            complete_todo(path, line, task_text, vault_root())
+            return f"Completed: '{task_text}'"
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
 
 try:
