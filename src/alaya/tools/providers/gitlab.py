@@ -13,7 +13,13 @@ class GitLabError(Exception):
 
 
 def _run_glab(args: list[str], timeout: int = 30) -> str:
-    result = subprocess.run(["glab"] + args, capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run(["glab"] + args, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise GitLabError(
+            "glab CLI not found. Install with: brew install glab (https://gitlab.com/gitlab-org/cli). "
+            "Alternatively, use the GitLab API directly."
+        )
     if result.returncode != 0:
         raise GitLabError(result.stderr.strip() or f"glab exited with {result.returncode}")
     return result.stdout.strip()
