@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alaya.tools.read import get_note, list_notes, get_backlinks, get_links, get_tags
+from alaya.tools.read import get_note, get_note_by_title, list_notes, get_backlinks, get_links, get_tags
 
 
 ZK_LIST_OUTPUT = """\
@@ -51,6 +51,46 @@ class TestGetNote:
     def test_path_traversal_rejected(self, vault: Path) -> None:
         with pytest.raises(ValueError):
             get_note("../../etc/passwd", vault)
+
+    # --- structured return (R-RD-02) ---
+
+    def test_structured_return_has_metadata_header(self, vault: Path) -> None:
+        result = get_note("projects/second-brain.md", vault)
+        assert "**Title:**" in result
+        assert "**Date:**" in result
+        assert "**Path:**" in result
+
+    def test_structured_return_has_content_separator(self, vault: Path) -> None:
+        result = get_note("projects/second-brain.md", vault)
+        assert "---" in result
+        assert "FastMCP" in result  # body content follows separator
+
+    def test_structured_return_includes_tags_when_present(self, vault: Path) -> None:
+        result = get_note("projects/second-brain.md", vault)
+        assert "**Tags:**" in result
+
+    # --- title-based lookup (R-RD-01) ---
+
+    def test_title_lookup_finds_note(self, vault: Path) -> None:
+        result = get_note_by_title("second-brain", vault)
+        assert "FastMCP" in result
+
+    def test_title_lookup_case_insensitive(self, vault: Path) -> None:
+        result = get_note_by_title("SECOND-BRAIN", vault)
+        assert "FastMCP" in result
+
+    def test_title_lookup_missing_raises(self, vault: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            get_note_by_title("this-note-does-not-exist", vault)
+
+    def test_title_lookup_ambiguous_raises(self, vault: Path) -> None:
+        """Two notes in the vault fixture share the 'platform' title fragment — use exact match."""
+        # Create a second note with the same title to force ambiguity
+        (vault / "ideas" / "second-brain-copy.md").write_text(
+            "---\ntitle: second-brain\ndate: 2026-02-01\n---\nDuplicate.\n"
+        )
+        with pytest.raises(ValueError, match="[Aa]mbiguous"):
+            get_note_by_title("second-brain", vault)
 
 
 class TestListNotes:

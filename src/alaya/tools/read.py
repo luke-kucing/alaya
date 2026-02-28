@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
-from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.vault import resolve_note_path
 from alaya.zk import run_zk, ZKError
 
@@ -30,12 +30,64 @@ def reindex_vault(vault: Path, confirm: bool = False) -> str:
         return f"Reindex failed: {e}"
 
 
+def _format_note(relative_path: str, content: str) -> str:
+    """Format a note with a structured metadata header above the body."""
+    from alaya.index.embedder import _parse_frontmatter, _parse_inline_tags
+    meta, body = _parse_frontmatter(content)
+    title = meta.get("title", Path(relative_path).stem)
+    date = meta.get("date", "")
+    # tags may be in frontmatter or inline; prefer frontmatter, fall back to inline
+    tags_raw = meta.get("tags", "")
+    if not tags_raw:
+        inline = _parse_inline_tags(body)
+        tags_raw = " ".join(f"#{t}" for t in inline)
+
+    lines = [f"**Title:** {title}", f"**Date:** {date}"]
+    if tags_raw:
+        lines.append(f"**Tags:** {tags_raw}")
+    lines.append(f"**Path:** {relative_path}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append(body.strip())
+    return "\n".join(lines)
+
+
 def get_note(relative_path: str, vault: Path) -> str:
-    """Return the full content of a note by relative path."""
+    """Return a note's content with a structured metadata header."""
     path = resolve_note_path(relative_path, vault)
     if not path.exists():
         raise FileNotFoundError(f"Note not found: {relative_path}")
-    return path.read_text()
+    return _format_note(relative_path, path.read_text())
+
+
+def get_note_by_title(title: str, vault: Path) -> str:
+    """Find a note by its frontmatter title and return formatted content.
+
+    Raises FileNotFoundError if no match, ValueError if multiple matches.
+    """
+    from alaya.index.embedder import _parse_frontmatter
+    title_lower = title.lower()
+    matches = []
+    for md_file in vault.rglob("*.md"):
+        try:
+            content = md_file.read_text()
+        except OSError:
+            continue
+        meta, _ = _parse_frontmatter(content)
+        note_title = meta.get("title", md_file.stem)
+        if note_title.lower() == title_lower:
+            matches.append((md_file, content))
+
+    if not matches:
+        raise FileNotFoundError(f"No note found with title: {title!r}")
+    if len(matches) > 1:
+        paths = ", ".join(str(f.relative_to(vault)) for f, _ in matches)
+        raise ValueError(f"Ambiguous title {title!r} — matches: {paths}")
+
+    md_file, content = matches[0]
+    relative_path = str(md_file.relative_to(vault))
+    return _format_note(relative_path, content)
 
 
 def list_notes(
@@ -133,9 +185,15 @@ def _register(mcp: FastMCP) -> None:
     vault_root = get_vault_root
 
     @mcp.tool()
-    def get_note_tool(path: str) -> str:
-        """Read the full content of a note by its relative path (e.g. 'projects/second-brain.md')."""
+    def get_note_tool(path: str = "", title: str = "") -> str:
+        """Read a note. Provide exactly one of path (relative path) or title (frontmatter title)."""
+        if path and title:
+            return error(INVALID_ARGUMENT, "Provide path or title, not both.")
+        if not path and not title:
+            return error(INVALID_ARGUMENT, "Either path or title is required.")
         try:
+            if title:
+                return get_note_by_title(title, vault_root())
             return get_note(path, vault_root())
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
