@@ -3,11 +3,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
-
-from alaya.vault import parse_note
 
 logger = logging.getLogger(__name__)
 
@@ -37,64 +34,10 @@ class Chunk:
 
 
 def chunk_note(path: str, content: str) -> list[Chunk]:
-    """Split a note into section-level chunks.
-
-    Each ## header becomes its own chunk. Content before the first ## header
-    is included as a preamble chunk if non-empty.
-    """
-    note = parse_note(content)
-    title = note.title or Path(path).stem
-    date = note.date
-    directory = path.split("/")[0] if "/" in path else ""
-    tags = note.tags
-    body = note.body
-
-    lines = body.splitlines()
-
-    sections: list[tuple[str, list[str]]] = []
-    current_header = ""
-    current_lines: list[str] = []
-
-    for line in lines:
-        if line.startswith("## "):
-            if current_lines and "".join(current_lines).strip():
-                sections.append((current_header, current_lines))
-            current_header = line[3:].strip()
-            current_lines = []
-        else:
-            current_lines.append(line)
-
-    if current_lines and "".join(current_lines).strip():
-        sections.append((current_header, current_lines))
-
-    if not sections:
-        return [Chunk(
-            path=path,
-            title=title,
-            tags=tags,
-            directory=directory,
-            modified_date=date,
-            chunk_index=0,
-            text=content.strip(),
-        )]
-
-    chunks = []
-    for idx, (header, section_lines) in enumerate(sections):
-        text = "\n".join(section_lines).strip()
-        if not text:
-            continue
-        prefix = f"{header}\n" if header else ""
-        chunks.append(Chunk(
-            path=path,
-            title=title,
-            tags=tags,
-            directory=directory,
-            modified_date=date,
-            chunk_index=idx,
-            text=f"{prefix}{text}",
-        ))
-
-    return chunks
+    """Split a note into chunks using the appropriate strategy for its content."""
+    from alaya.index.chunking import select_strategy, ChunkConfig
+    strategy = select_strategy(path, content)
+    return strategy.chunk(path, content, ChunkConfig())
 
 
 def embed_chunks(chunks: list[Chunk]) -> list[np.ndarray]:
