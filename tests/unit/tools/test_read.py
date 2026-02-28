@@ -117,6 +117,43 @@ class TestListNotes:
             result = list_notes(vault)
         assert "no notes" in result.lower()
 
+    # --- since / until / recent / sort (R-RD-03, R-SQ-02, R-SQ-04) ---
+
+    def test_since_passes_modified_after_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, since="2026-01-01")
+        args = mock_zk.call_args[0][0]
+        assert "--modified-after" in args
+        assert "2026-01-01" in args
+
+    def test_until_passes_modified_before_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, until="2026-02-28")
+        args = mock_zk.call_args[0][0]
+        assert "--modified-before" in args
+        assert "2026-02-28" in args
+
+    def test_recent_converts_to_modified_after(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, recent=7)
+        args = mock_zk.call_args[0][0]
+        assert "--modified-after" in args
+        idx = args.index("--modified-after")
+        from datetime import date, timedelta
+        cutoff = date.today() - timedelta(days=7)
+        assert args[idx + 1] == cutoff.isoformat()
+
+    def test_sort_passes_sort_flag_to_zk(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+            list_notes(vault, sort="modified")
+        args = mock_zk.call_args[0][0]
+        assert "--sort" in args
+        assert "modified" in args
+
+    def test_recent_and_since_conflict_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="[Cc]onflict|not both|exclusive"):
+            list_notes(vault, since="2026-01-01", recent=7)
+
 
 class TestGetBacklinks:
     def test_returns_backlinks(self, vault: Path) -> None:

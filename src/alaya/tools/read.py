@@ -95,11 +95,35 @@ def list_notes(
     directory: str | None = None,
     tag: str | None = None,
     limit: int = 50,
+    since: str | None = None,
+    until: str | None = None,
+    recent: int | None = None,
+    sort: str | None = None,
 ) -> str:
-    """Return a Markdown table of notes, optionally filtered by directory or tag."""
+    """Return a Markdown table of notes, optionally filtered/sorted.
+
+    since/until: ISO date strings for modification date range.
+    recent: shorthand for notes modified in the last N days.
+    sort: one of 'modified', 'created', 'title'.
+    """
+    from datetime import date, timedelta
+
+    if since and recent is not None:
+        raise ValueError("since and recent are exclusive — use one or the other, not both")
+
     args = ["list", "--format", "{{path}}\t{{title}}\t{{date}}\t{{tags}}", "--limit", str(limit)]
+
     if tag:
         args += ["--tag", tag]
+    if since:
+        args += ["--modified-after", since]
+    if recent is not None:
+        cutoff = (date.today() - timedelta(days=recent)).isoformat()
+        args += ["--modified-after", cutoff]
+    if until:
+        args += ["--modified-before", until]
+    if sort:
+        args += ["--sort", sort]
     if directory:
         args.append(directory)
 
@@ -112,9 +136,9 @@ def list_notes(
         parts = line.split("\t")
         path = parts[0] if len(parts) > 0 else ""
         title = parts[1] if len(parts) > 1 else ""
-        date = parts[2] if len(parts) > 2 else ""
+        date_str = parts[2] if len(parts) > 2 else ""
         tags = parts[3] if len(parts) > 3 else ""
-        rows.append(f"| [[{title}]] | `{path}` | {date} | {tags} |")
+        rows.append(f"| [[{title}]] | `{path}` | {date_str} | {tags} |")
 
     header = "| Title | Path | Date | Tags |\n|---|---|---|---|"
     return header + "\n" + "\n".join(rows)
@@ -201,14 +225,29 @@ def _register(mcp: FastMCP) -> None:
             return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
-    def list_notes_tool(directory: str = "", tag: str = "", limit: int = 50) -> str:
-        """List notes in the vault, optionally filtered by directory or tag."""
-        return list_notes(
-            vault_root(),
-            directory=directory or None,
-            tag=tag or None,
-            limit=limit,
-        )
+    def list_notes_tool(
+        directory: str = "",
+        tag: str = "",
+        limit: int = 50,
+        since: str = "",
+        until: str = "",
+        recent: int = 0,
+        sort: str = "",
+    ) -> str:
+        """List notes. Filter by directory, tag, date range (since/until) or recent N days. Sort by modified/created/title."""
+        try:
+            return list_notes(
+                vault_root(),
+                directory=directory or None,
+                tag=tag or None,
+                limit=limit,
+                since=since or None,
+                until=until or None,
+                recent=recent or None,
+                sort=sort or None,
+            )
+        except ValueError as e:
+            return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
     def get_backlinks_tool(path: str) -> str:
