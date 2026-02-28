@@ -80,6 +80,31 @@ class TestCreateNote:
         with pytest.raises(FileExistsError, match="already exists"):
             create_note(title="dupe note", directory="ideas", tags=[], body="overwrite attempt", vault=vault)
 
+    def test_empty_slug_title_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="alphanumeric"):
+            create_note(title="!!!", directory="ideas", tags=[], body="", vault=vault)
+
+    def test_dash_only_title_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="alphanumeric"):
+            create_note(title="---", directory="ideas", tags=[], body="", vault=vault)
+
+    def test_valid_title_with_special_chars_succeeds(self, vault: Path) -> None:
+        # special chars stripped, leaving a valid slug
+        path = create_note(title="hello! world?", directory="ideas", tags=[], body="", vault=vault)
+        assert "hello" in path
+
+    def test_invalid_tag_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="Invalid tag"):
+            create_note(title="valid title", directory="ideas", tags=["bad:tag"], body="", vault=vault)
+
+    def test_tag_with_colon_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="Invalid tag"):
+            create_note(title="valid title", directory="ideas", tags=["key:value"], body="", vault=vault)
+
+    def test_valid_tags_accepted(self, vault: Path) -> None:
+        path = create_note(title="tagged note", directory="ideas", tags=["python", "my-tag", "tag_2"], body="", vault=vault)
+        assert path.endswith(".md")
+
 
 class TestAppendToNote:
     def test_appends_text_to_existing_note(self, vault: Path) -> None:

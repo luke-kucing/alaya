@@ -38,6 +38,9 @@ def _slugify(title: str) -> str:
     return slug
 
 
+_VALID_TAG_RE = re.compile(r"^[\w-]+$")
+
+
 def create_note(
     title: str,
     directory: str,
@@ -46,10 +49,17 @@ def create_note(
     vault: Path,
 ) -> str:
     """Create a new note and return its relative path."""
+    slug = _slugify(title)
+    if not slug.strip("-"):
+        raise ValueError("Title must contain at least one alphanumeric character")
+
+    for tag in tags:
+        if not _VALID_TAG_RE.match(tag):
+            raise ValueError(f"Invalid tag {tag!r}: tags may only contain letters, digits, underscores, and hyphens")
+
     target_dir = _validate_directory(directory, vault)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    slug = _slugify(title)
     file_path = target_dir / f"{slug}.md"
 
     tag_line = " ".join(f"#{t}" for t in tags) if tags else ""
