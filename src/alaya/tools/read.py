@@ -4,7 +4,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
-from alaya.vault import resolve_note_path
+from alaya.vault import resolve_note_path, parse_note, _parse_inline_tags
 from alaya.zk import run_zk, ZKError
 
 
@@ -32,24 +32,18 @@ def reindex_vault(vault: Path, confirm: bool = False) -> str:
 
 def _format_note(relative_path: str, content: str) -> str:
     """Format a note with a structured metadata header above the body."""
-    from alaya.index.embedder import _parse_frontmatter, _parse_inline_tags
-    meta, body = _parse_frontmatter(content)
-    title = meta.get("title", Path(relative_path).stem)
-    date = meta.get("date", "")
-    # tags may be in frontmatter or inline; prefer frontmatter, fall back to inline
-    tags_raw = meta.get("tags", "")
-    if not tags_raw:
-        inline = _parse_inline_tags(body)
-        tags_raw = " ".join(f"#{t}" for t in inline)
+    note = parse_note(content)
+    title = note.title or Path(relative_path).stem
+    tags_raw = " ".join(f"#{t}" for t in note.tags)
 
-    lines = [f"**Title:** {title}", f"**Date:** {date}"]
+    lines = [f"**Title:** {title}", f"**Date:** {note.date}"]
     if tags_raw:
         lines.append(f"**Tags:** {tags_raw}")
     lines.append(f"**Path:** {relative_path}")
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append(body.strip())
+    lines.append(note.body.strip())
     return "\n".join(lines)
 
 
@@ -66,7 +60,6 @@ def get_note_by_title(title: str, vault: Path) -> str:
 
     Raises FileNotFoundError if no match, ValueError if multiple matches.
     """
-    from alaya.index.embedder import _parse_frontmatter
     title_lower = title.lower()
     matches = []
     for md_file in vault.rglob("*.md"):
@@ -74,8 +67,8 @@ def get_note_by_title(title: str, vault: Path) -> str:
             content = md_file.read_text()
         except OSError:
             continue
-        meta, _ = _parse_frontmatter(content)
-        note_title = meta.get("title", md_file.stem)
+        note = parse_note(content)
+        note_title = note.title or md_file.stem
         if note_title.lower() == title_lower:
             matches.append((md_file, content))
 

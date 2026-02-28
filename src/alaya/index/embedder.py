@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+from alaya.vault import parse_note
 
 logger = logging.getLogger(__name__)
 
@@ -35,51 +36,18 @@ class Chunk:
     text: str
 
 
-def _parse_frontmatter(content: str) -> tuple[dict, str]:
-    """Extract YAML frontmatter and return (metadata, body)."""
-    meta: dict = {}
-    if not content.startswith("---"):
-        return meta, content
-
-    end = content.find("\n---", 3)
-    if end == -1:
-        return meta, content
-
-    fm_block = content[3:end].strip()
-    body = content[end + 4:].lstrip("\n")
-
-    for line in fm_block.splitlines():
-        if ":" in line:
-            key, _, val = line.partition(":")
-            meta[key.strip()] = val.strip()
-
-    return meta, body
-
-
-def _parse_inline_tags(body: str) -> list[str]:
-    """Extract #hashtags from the first non-empty tag line after frontmatter."""
-    for line in body.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        tags = re.findall(r"#([\w-]+)", stripped)
-        if tags and re.match(r"^(#[\w-]+ ?)+$", stripped):
-            return tags
-        break
-    return []
-
-
 def chunk_note(path: str, content: str) -> list[Chunk]:
     """Split a note into section-level chunks.
 
     Each ## header becomes its own chunk. Content before the first ## header
     is included as a preamble chunk if non-empty.
     """
-    meta, body = _parse_frontmatter(content)
-    title = meta.get("title", Path(path).stem)
-    date = meta.get("date", "")
+    note = parse_note(content)
+    title = note.title or Path(path).stem
+    date = note.date
     directory = path.split("/")[0] if "/" in path else ""
-    tags = _parse_inline_tags(body)
+    tags = note.tags
+    body = note.body
 
     lines = body.splitlines()
 
