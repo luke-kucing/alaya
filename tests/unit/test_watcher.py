@@ -81,6 +81,47 @@ class TestVaultEventHandler:
             import time; time.sleep(0.1)  # let the daemon thread run
             mock_ingest.assert_called_once()
 
+    def test_stop_waits_for_ingest_threads(self, vault: Path) -> None:
+        """stop() must join all in-flight ingest threads before returning."""
+        import time
+        handler = self._make_handler(vault)
+        completed = []
+
+        def slow_ingest(src, vault):
+            time.sleep(0.05)
+            completed.append(src)
+
+        src_path = str(vault / "raw/paper.pdf")
+        (vault / "raw").mkdir(exist_ok=True)
+        (vault / "raw/paper.pdf").write_bytes(b"%PDF-1.4 fake")
+
+        with patch("alaya.watcher.ingest", side_effect=slow_ingest):
+            handler._trigger_ingest(src_path)
+            # thread is running — completed is still empty
+            assert completed == []
+            handler.stop(timeout=5.0)
+            # after stop(), the thread must have finished
+            assert completed == [src_path]
+
+    def test_stop_warns_on_slow_thread(self, vault: Path) -> None:
+        """stop() logs a warning if a thread exceeds the timeout."""
+        import time
+        handler = self._make_handler(vault)
+
+        def hung_ingest(src, vault):
+            time.sleep(10)
+
+        src_path = str(vault / "raw/hung.pdf")
+        (vault / "raw").mkdir(exist_ok=True)
+        (vault / "raw/hung.pdf").write_bytes(b"%PDF-1.4 fake")
+
+        with patch("alaya.watcher.ingest", side_effect=hung_ingest), \
+             patch("alaya.watcher.logger") as mock_log:
+            handler._trigger_ingest(src_path)
+            handler.stop(timeout=0.05)  # expire immediately
+            mock_log.warning.assert_called_once()
+            # cleanup: thread is daemon so it won't block test exit
+
     def test_directory_events_ignored(self, vault: Path) -> None:
         handler = self._make_handler(vault)
         event = MagicMock()
