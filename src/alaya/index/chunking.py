@@ -196,7 +196,9 @@ def select_strategy(path: str, content: str) -> ChunkingStrategy:
     directory = path.split("/")[0] if "/" in path else ""
     if directory == "daily":
         return DailyNoteChunker()
-    if "## " in content:
+    # check the body (after frontmatter) for section headers
+    note = parse_note(content)
+    if "## " in note.body:
         return SectionChunker()
     return SlidingWindowChunker()
 

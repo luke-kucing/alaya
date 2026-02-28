@@ -14,7 +14,7 @@ _model = None
 _loaded_model_name: str | None = None  # track which model is loaded
 
 
-def _get_model():
+def get_model():
     global _model, _loaded_model_name
     cfg = get_active_model()
     if _model is None or _loaded_model_name != cfg.name:
@@ -49,7 +49,7 @@ def chunk_note(path: str, content: str) -> list[Chunk]:
 
 def embed_chunks(chunks: list[Chunk]) -> list[np.ndarray]:
     """Embed a list of chunks. Returns one normalized float32 ndarray per chunk."""
-    model, cfg = _get_model()
+    model, cfg = get_model()
     texts = [f"{cfg.document_prefix}{c.text}" for c in chunks]
     raw = np.array(list(model.embed(texts)))
     norms = np.linalg.norm(raw, axis=1, keepdims=True)

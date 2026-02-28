@@ -23,11 +23,11 @@ def _run_hybrid_search(
     limit: int = 20,
 ) -> list[dict]:
     """Embed the query and run hybrid search against LanceDB."""
-    from alaya.index.embedder import _get_model
+    from alaya.index.embedder import get_model
     from alaya.index.store import get_store, hybrid_search
 
     import numpy as np
-    model, cfg = _get_model()
+    model, cfg = get_model()
     raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{query}"])))
     norm = np.linalg.norm(raw[0])
     query_embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)

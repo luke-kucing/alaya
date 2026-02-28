@@ -1,20 +1,29 @@
 """Lightweight event system for write-through index updates."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable
 
-_listeners: list[Callable[[str, str], None]] = []
+
+@dataclass
+class NoteEvent:
+    event_type: str  # "created", "modified", "deleted", "moved"
+    path: str        # relative path of the affected note
+    old_path: str | None = None  # set only for "moved" events
 
 
-def on_note_change(callback: Callable[[str, str], None]) -> None:
-    """Register a callback for (event_type, relative_path) events."""
+_listeners: list[Callable[[NoteEvent], None]] = []
+
+
+def on_note_change(callback: Callable[[NoteEvent], None]) -> None:
+    """Register a callback for note change events."""
     _listeners.append(callback)
 
 
-def emit(event_type: str, path: str) -> None:
-    """Fire all registered listeners with the given event_type and path."""
+def emit(event: NoteEvent) -> None:
+    """Fire all registered listeners with the given event."""
     for listener in _listeners:
-        listener(event_type, path)
+        listener(event)
 
 
 def clear_listeners() -> None:

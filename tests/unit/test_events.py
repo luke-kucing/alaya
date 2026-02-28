@@ -1,7 +1,7 @@
 """Tests for the event system used by write-through index updates."""
 import pytest
 
-from alaya.events import on_note_change, emit, clear_listeners
+from alaya.events import NoteEvent, on_note_change, emit, clear_listeners
 
 
 class TestEventSystem:
@@ -10,27 +10,36 @@ class TestEventSystem:
 
     def test_emit_calls_registered_listener(self):
         received = []
-        on_note_change(lambda event, path: received.append((event, path)))
-        emit("created", "notes/test.md")
-        assert received == [("created", "notes/test.md")]
+        on_note_change(lambda event: received.append(event))
+        emit(NoteEvent("created", "notes/test.md"))
+        assert len(received) == 1
+        assert received[0].event_type == "created"
+        assert received[0].path == "notes/test.md"
 
     def test_multiple_listeners_all_called(self):
         calls_a, calls_b = [], []
-        on_note_change(lambda e, p: calls_a.append((e, p)))
-        on_note_change(lambda e, p: calls_b.append((e, p)))
-        emit("modified", "notes/foo.md")
-        assert calls_a == [("modified", "notes/foo.md")]
-        assert calls_b == [("modified", "notes/foo.md")]
+        on_note_change(lambda e: calls_a.append(e.event_type))
+        on_note_change(lambda e: calls_b.append(e.event_type))
+        emit(NoteEvent("modified", "notes/foo.md"))
+        assert calls_a == ["modified"]
+        assert calls_b == ["modified"]
 
     def test_clear_listeners(self):
         received = []
-        on_note_change(lambda e, p: received.append(e))
+        on_note_change(lambda e: received.append(e))
         clear_listeners()
-        emit("created", "notes/test.md")
+        emit(NoteEvent("created", "notes/test.md"))
         assert received == []
 
     def test_no_listeners_does_not_raise(self):
-        emit("deleted", "notes/gone.md")  # should not raise
+        emit(NoteEvent("deleted", "notes/gone.md"))  # should not raise
+
+    def test_moved_event_has_old_path(self):
+        received = []
+        on_note_change(lambda e: received.append(e))
+        emit(NoteEvent("moved", "notes/new.md", old_path="notes/old.md"))
+        assert received[0].old_path == "notes/old.md"
+        assert received[0].path == "notes/new.md"
 
 
 class TestUpdateMetadata:

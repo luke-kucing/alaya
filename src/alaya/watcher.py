@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -17,15 +18,20 @@ from alaya.tools.ingest import ingest
 _IGNORED_DIRS = {".zk", ".git", ".venv"}
 _INGESTIBLE_SUFFIXES = {".pdf", ".md", ".txt"}
 _DEBOUNCE_SECONDS = 2.0
+# How long (seconds) a path is considered "recently indexed" by the event system
+_SKIP_WINDOW = 5.0
 
 
 class VaultEventHandler(FileSystemEventHandler):
     """Handle file system events in the vault.
 
-    - .md file created/modified → upsert into LanceDB
-    - .md file deleted → remove from LanceDB
-    - file created in raw/ → trigger ingest
-    - directories and non-text files → ignored
+    - .md file created/modified -> upsert into LanceDB
+    - .md file deleted -> remove from LanceDB
+    - file created in raw/ -> trigger ingest
+    - directories and non-text files -> ignored
+
+    Paths recently indexed by the write-through event system are skipped
+    to avoid redundant re-indexing.
     """
 
     def __init__(self, vault: Path, store: VaultStore, debounce_seconds: float = _DEBOUNCE_SECONDS) -> None:
@@ -34,6 +40,21 @@ class VaultEventHandler(FileSystemEventHandler):
         self.store = store
         self._debounce_seconds = debounce_seconds
         self._timers: dict[str, threading.Timer] = {}
+        self._recently_indexed: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def mark_indexed(self, relative_path: str) -> None:
+        """Mark a path as recently indexed by the event system."""
+        with self._lock:
+            self._recently_indexed[relative_path] = time.monotonic()
+
+    def _was_recently_indexed(self, relative_path: str) -> bool:
+        """Check if the event system already indexed this path recently."""
+        with self._lock:
+            ts = self._recently_indexed.pop(relative_path, None)
+        if ts is None:
+            return False
+        return (time.monotonic() - ts) < _SKIP_WINDOW
 
     def _is_ignored(self, path: str) -> bool:
         parts = Path(path).parts
@@ -56,8 +77,11 @@ class VaultEventHandler(FileSystemEventHandler):
             path = Path(src_path)
             if not path.exists():
                 return
-            content = path.read_text()
             rel = self._relative(src_path)
+            if self._was_recently_indexed(rel):
+                logger.debug("Skipping watcher upsert for %s (already indexed by event)", rel)
+                return
+            content = path.read_text()
             chunks = chunk_note(rel, content)
             embeddings = embed_chunks(chunks)
             upsert_note(rel, chunks, embeddings, self.store)
@@ -99,7 +123,8 @@ class VaultEventHandler(FileSystemEventHandler):
             return
         if Path(src).suffix.lower() == ".md":
             rel = self._relative(src)
-            delete_note_from_index(rel, self.store)
+            if not self._was_recently_indexed(rel):
+                delete_note_from_index(rel, self.store)
 
     def _trigger_ingest(self, src_path: str) -> None:
         """Fire-and-forget ingest for a file dropped into raw/."""
@@ -113,10 +138,10 @@ class VaultEventHandler(FileSystemEventHandler):
         thread.start()
 
 
-def start_watcher(vault: Path, store: VaultStore) -> Observer:
-    """Start the watchdog observer and return it (caller is responsible for stop())."""
+def start_watcher(vault: Path, store: VaultStore) -> tuple[Observer, VaultEventHandler]:
+    """Start the watchdog observer. Returns (observer, handler)."""
     handler = VaultEventHandler(vault=vault, store=store)
     observer = Observer()
     observer.schedule(handler, str(vault), recursive=True)
     observer.start()
-    return observer
+    return observer, handler

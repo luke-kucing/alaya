@@ -54,7 +54,7 @@ class TestChunkNote:
 
 class TestEmbedChunks:
     def _mock_get_model(self, n: int):
-        """Return a (mock_model, mock_cfg) tuple matching the new _get_model() API."""
+        """Return a (mock_model, mock_cfg) tuple matching the get_model() API."""
         from alaya.index.models import MODELS, DEFAULT_MODEL_KEY
         mock_model = MagicMock()
         vecs = np.random.rand(n, 768).astype(np.float64)
@@ -66,7 +66,7 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(len(chunks))):
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(len(chunks))):
             embeddings = embed_chunks(chunks)
 
         assert len(embeddings) == len(chunks)
@@ -76,7 +76,7 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)[:2]
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(2)):
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(2)):
             embeddings = embed_chunks(chunks)
 
         assert embeddings[0].shape == (768,)
@@ -85,7 +85,7 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)[:1]
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(1)):
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(1)):
             embeddings = embed_chunks(chunks)
 
         assert embeddings[0].dtype == np.float32
@@ -94,7 +94,7 @@ class TestEmbedChunks:
         content = (vault / "projects/second-brain.md").read_text()
         chunks = chunk_note("projects/second-brain.md", content)[:1]
 
-        with patch("alaya.index.embedder._get_model", return_value=self._mock_get_model(1)):
+        with patch("alaya.index.embedder.get_model", return_value=self._mock_get_model(1)):
             embeddings = embed_chunks(chunks)
 
         norm = np.linalg.norm(embeddings[0])

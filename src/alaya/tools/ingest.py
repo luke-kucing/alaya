@@ -76,11 +76,11 @@ def _index_content(
 def _find_suggested_links(text: str, vault: Path, limit: int = 5) -> list[dict]:
     """Find top semantically related existing notes for suggested wikilinks."""
     try:
-        from alaya.index.embedder import _get_model
+        from alaya.index.embedder import get_model
         from alaya.index.store import get_store, hybrid_search
         import numpy as np
 
-        model, cfg = _get_model()
+        model, cfg = get_model()
         raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text[:512]}"])))
         norm = np.linalg.norm(raw[0])
         embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)

@@ -6,7 +6,7 @@ from alaya.errors import SECTION_NOT_FOUND
 
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, ALREADY_EXISTS, OUTSIDE_VAULT, INVALID_ARGUMENT
-from alaya.events import emit
+from alaya.events import emit, NoteEvent
 from alaya.vault import resolve_note_path
 
 # Directories considered valid targets for note creation
@@ -71,7 +71,7 @@ def create_note(
 
     file_path.write_text("\n".join(content_parts) + "\n")
     relative = str(file_path.relative_to(vault))
-    emit("created", relative)
+    emit(NoteEvent("created", relative))
     return relative
 
 
@@ -99,7 +99,7 @@ def append_to_note(
     if section_header is None:
         separator = "\n" if existing.endswith("\n") else "\n\n"
         path.write_text(existing + separator + text + "\n")
-        emit("modified", relative_path)
+        emit(NoteEvent("modified", relative_path))
         return
 
     # Insert under the named section, before the next ## heading or EOF
@@ -122,7 +122,7 @@ def append_to_note(
     # inject a blank line + text before the insertion point
     new_lines = lines[:insert_at] + ["\n", text + "\n"] + lines[insert_at:]
     path.write_text("".join(new_lines))
-    emit("modified", relative_path)
+    emit(NoteEvent("modified", relative_path))
 
 
 def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Path) -> None:
@@ -184,7 +184,7 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
         lines.insert(insert_at, new_tag_line)
 
     path.write_text("\n".join(lines) + "\n")
-    emit("modified", relative_path)
+    emit(NoteEvent("modified", relative_path))
 
 
 # --- FastMCP tool registration ---

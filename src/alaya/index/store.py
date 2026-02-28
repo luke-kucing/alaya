@@ -12,6 +12,10 @@ import pyarrow as pa
 logger = logging.getLogger(__name__)
 
 _TABLE_NAME = "notes"
+# LanceDB raises OSError (disk/connection), ValueError (bad query),
+# and pa.ArrowInvalid (schema mismatch). We catch these specifically
+# so programming errors (TypeError, KeyError, etc.) still propagate.
+_STORE_ERRORS = (OSError, ValueError, pa.ArrowInvalid)
 
 
 def _get_dim() -> int:
@@ -51,7 +55,7 @@ class VaultStore:
     def count(self) -> int:
         try:
             return self._get_table().count_rows()
-        except Exception:
+        except _STORE_ERRORS:
             return 0
 
 
@@ -68,7 +72,7 @@ def upsert_note(
     safe_path = path.replace("'", "''")
     try:
         table.delete(f"path = '{safe_path}'")
-    except Exception as e:
+    except _STORE_ERRORS as e:
         logger.warning("Failed to delete existing chunks for %s before upsert: %s", path, e)
 
     if not chunks:
@@ -96,7 +100,7 @@ def delete_note_from_index(path: str, store: VaultStore) -> None:
     try:
         table = store._get_table()
         table.delete(f"path = '{safe_path}'")
-    except Exception as e:
+    except _STORE_ERRORS as e:
         logger.warning("Failed to delete %s from index: %s", path, e)
 
 
@@ -133,7 +137,7 @@ def update_metadata(
             updated.append(row)
 
         table.add(updated)
-    except Exception as e:
+    except _STORE_ERRORS as e:
         logger.warning("Failed to update metadata for %s: %s", old_path, e)
 
 
@@ -194,7 +198,7 @@ def hybrid_search(
         output = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
         return output[:limit]
 
-    except Exception as e:
+    except _STORE_ERRORS as e:
         logger.warning("hybrid_search failed for query %r: %s", query, e)
         return []
 
