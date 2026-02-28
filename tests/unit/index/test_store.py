@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from alaya.index.embedder import Chunk, chunk_note
-from alaya.index.store import upsert_note, delete_note_from_index, hybrid_search, VaultStore, get_store, reset_store
+from alaya.index.store import upsert_note, delete_note_from_index, hybrid_search, VaultStore, get_store, reset_store, _sq
 
 
 def _make_chunks(path: str, text: str = "Some content about kubernetes and helm.") -> list[Chunk]:
@@ -165,3 +165,30 @@ class TestGetStore:
         reset_store()
         s2 = get_store(tmp_path)
         assert s1 is not s2
+
+
+class TestSqlEscape:
+    """Verify _sq centralises SQL filter escaping correctly."""
+
+    def test_plain_string_unchanged(self):
+        assert _sq("projects/foo.md") == "projects/foo.md"
+
+    def test_single_quote_doubled(self):
+        assert _sq("it's/note.md") == "it''s/note.md"
+
+    def test_multiple_single_quotes(self):
+        assert _sq("a'b'c") == "a''b''c"
+
+    def test_double_quote_untouched(self):
+        # double quotes are not special in SQL string literals
+        assert _sq('say "hello"') == 'say "hello"'
+
+    def test_unicode_apostrophe_not_confused(self):
+        # U+2019 RIGHT SINGLE QUOTATION MARK — not the same as ASCII '
+        assert _sq("it\u2019s") == "it\u2019s"
+
+    def test_empty_string(self):
+        assert _sq("") == ""
+
+    def test_backslash_untouched(self):
+        assert _sq("path\\to\\file") == "path\\to\\file"
