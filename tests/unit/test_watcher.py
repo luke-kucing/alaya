@@ -215,3 +215,57 @@ class TestDebounce:
             time.sleep(0.15)
             # timer entry removed after firing
             assert src_path not in handler._timers
+
+
+class TestRecentlyIndexed:
+    """Tests for the mark_indexed / _was_recently_indexed race-condition fix."""
+
+    def _make_handler(self, vault: Path) -> VaultEventHandler:
+        mock_store = MagicMock()
+        return VaultEventHandler(vault=vault, store=mock_store)
+
+    def test_mark_then_check_returns_true(self, vault: Path) -> None:
+        handler = self._make_handler(vault)
+        handler.mark_indexed("projects/foo.md")
+        assert handler._was_recently_indexed("projects/foo.md") is True
+
+    def test_unknown_path_returns_false(self, vault: Path) -> None:
+        handler = self._make_handler(vault)
+        assert handler._was_recently_indexed("projects/unknown.md") is False
+
+    def test_expired_entry_returns_false_and_is_removed(self, vault: Path) -> None:
+        import time
+        from alaya import watcher as watcher_mod
+        handler = self._make_handler(vault)
+        # manually insert an expired timestamp
+        with handler._lock:
+            handler._recently_indexed["projects/old.md"] = time.monotonic() - (watcher_mod._SKIP_WINDOW + 1)
+        assert handler._was_recently_indexed("projects/old.md") is False
+        # expired entry must be cleaned up
+        with handler._lock:
+            assert "projects/old.md" not in handler._recently_indexed
+
+    def test_concurrent_mark_and_check_no_lost_update(self, vault: Path) -> None:
+        """mark_indexed from thread B must not be lost when thread A is mid-check."""
+        import threading
+        handler = self._make_handler(vault)
+        handler.mark_indexed("projects/foo.md")
+
+        results = []
+        barrier = threading.Barrier(2)
+
+        def checker():
+            barrier.wait()
+            results.append(handler._was_recently_indexed("projects/foo.md"))
+
+        def re_marker():
+            barrier.wait()
+            handler.mark_indexed("projects/foo.md")
+
+        t1 = threading.Thread(target=checker)
+        t2 = threading.Thread(target=re_marker)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        # after re-marking, a subsequent check must see the path as recent
+        assert handler._was_recently_indexed("projects/foo.md") is True

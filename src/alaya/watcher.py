@@ -18,8 +18,9 @@ from alaya.tools.ingest import ingest
 _IGNORED_DIRS = {".zk", ".git", ".venv"}
 _INGESTIBLE_SUFFIXES = {".pdf", ".md", ".txt"}
 _DEBOUNCE_SECONDS = 2.0
-# How long (seconds) a path is considered "recently indexed" by the event system
-_SKIP_WINDOW = 5.0
+# How long (seconds) a path is considered "recently indexed" by the event system.
+# 30s is conservative — covers slow embedding runs on large files.
+_SKIP_WINDOW = 30.0
 
 
 class VaultEventHandler(FileSystemEventHandler):
@@ -50,12 +51,21 @@ class VaultEventHandler(FileSystemEventHandler):
             self._recently_indexed[relative_path] = time.monotonic()
 
     def _was_recently_indexed(self, relative_path: str) -> bool:
-        """Check if the event system already indexed this path recently."""
+        """Check if the event system already indexed this path recently.
+
+        The read and age-check are both performed inside the lock so that a
+        concurrent mark_indexed() call cannot slip in between them.
+        Expired entries are removed inside the lock to keep the dict tidy.
+        """
         with self._lock:
-            ts = self._recently_indexed.pop(relative_path, None)
-        if ts is None:
+            ts = self._recently_indexed.get(relative_path)
+            if ts is None:
+                return False
+            if (time.monotonic() - ts) < _SKIP_WINDOW:
+                return True
+            # expired — remove and let the watcher proceed
+            del self._recently_indexed[relative_path]
             return False
-        return (time.monotonic() - ts) < _SKIP_WINDOW
 
     def _is_ignored(self, path: str) -> bool:
         parts = Path(path).parts
