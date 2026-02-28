@@ -60,9 +60,10 @@ def upsert_note(
     """Replace all chunks for `path` with the new chunks + embeddings."""
     table = store._get_table()
 
-    # delete existing rows for this path
+    # delete existing rows for this path (escape single quotes per SQL standard)
+    safe_path = path.replace("'", "''")
     try:
-        table.delete(f"path = '{path}'")
+        table.delete(f"path = '{safe_path}'")
     except Exception:
         pass
 
@@ -87,9 +88,10 @@ def upsert_note(
 
 def delete_note_from_index(path: str, store: VaultStore) -> None:
     """Remove all chunks for `path` from the index."""
+    safe_path = path.replace("'", "''")
     try:
         table = store._get_table()
-        table.delete(f"path = '{path}'")
+        table.delete(f"path = '{safe_path}'")
     except Exception:
         pass
 
@@ -115,7 +117,8 @@ def hybrid_search(
         q = table.search(query_embedding.tolist(), vector_column_name="vector")
 
         if directory:
-            q = q.where(f"directory = '{directory}'")
+            safe_directory = directory.replace("'", "''")
+            q = q.where(f"directory = '{safe_directory}'")
 
         results = q.limit(limit).to_list()
 

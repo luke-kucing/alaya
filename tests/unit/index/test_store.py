@@ -68,6 +68,17 @@ class TestDeleteNoteFromIndex:
         # should not raise
         delete_note_from_index("ideas/ghost.md", store)
 
+    def test_path_with_single_quote_does_not_crash(self, tmp_path: Path) -> None:
+        # Single quotes in paths must be escaped to avoid malformed filter expressions.
+        store = VaultStore(tmp_path / "lance")
+        path = "ideas/it's-complicated.md"
+        chunks = _make_chunks(path)
+        upsert_note(path, chunks, _fake_embeddings(chunks), store)
+        assert store.count() == 1
+        # Must not raise or leave ghost entries
+        delete_note_from_index(path, store)
+        assert store.count() == 0
+
 
 class TestHybridSearch:
     def test_returns_results(self, tmp_path: Path) -> None:
