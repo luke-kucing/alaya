@@ -118,3 +118,25 @@ class TestIngestTags:
         # tags should be passed along to indexing
         call_kwargs = mock_index.call_args
         assert call_kwargs is not None
+
+
+class TestIngestDate:
+    def test_synthetic_frontmatter_uses_today_not_hardcoded_date(self, vault: Path) -> None:
+        # _index_content builds synthetic frontmatter then calls chunk_note.
+        # The date: field must use date.today(), not a hardcoded literal.
+        from datetime import date
+        from alaya.tools.ingest import _index_content
+
+        today = date.today().isoformat()
+        captured = {}
+
+        def capture_chunk(path, content):
+            captured["content"] = content
+            return []
+
+        # _index_content does a local import of chunk_note from alaya.index.embedder
+        with patch("alaya.index.embedder.chunk_note", side_effect=capture_chunk):
+            _index_content("test/path.md", "Test Title", [], "some text", vault)
+
+        assert "2026-01-01" not in captured.get("content", ""), "Date must not be hardcoded"
+        assert today in captured.get("content", ""), f"Expected today {today} in synthetic frontmatter"

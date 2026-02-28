@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -56,7 +57,7 @@ def _index_content(
 
     # build a synthetic note-like string for chunking
     tag_line = " ".join(f"#{t}" for t in tags) if tags else ""
-    synthetic = f"---\ntitle: {title}\ndate: 2026-01-01\n---\n"
+    synthetic = f"---\ntitle: {title}\ndate: {date.today().isoformat()}\n---\n"
     if tag_line:
         synthetic += f"{tag_line}\n\n"
     synthetic += text
@@ -91,7 +92,6 @@ def ingest(
     source: str,
     title: str | None = None,
     tags: list[str] | None = None,
-    depth: int = 0,
     vault: Path | None = None,
 ) -> IngestResult:
     """Ingest a URL, PDF, or markdown file into LanceDB.
@@ -173,14 +173,12 @@ def _register(mcp: FastMCP) -> None:
         source: str,
         title: str = "",
         tags: list[str] | None = None,
-        depth: int = 0,
     ) -> str:
         """Ingest a URL, PDF, or markdown file. Returns raw_text, title, chunks indexed, and suggested wikilinks."""
         result = ingest(
             source,
             title=title or None,
             tags=tags or [],
-            depth=depth,
             vault=vault_root(),
         )
         links = "\n".join(f"- [[{r['title']}]]" for r in result.suggested_links[:5])
