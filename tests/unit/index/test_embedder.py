@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from alaya.index.embedder import chunk_note, embed_chunks, Chunk
+from alaya.index.embedder import chunk_note, embed_chunks, Chunk, reset_model
 
 
 class TestChunkNote:
@@ -99,3 +99,52 @@ class TestEmbedChunks:
 
         norm = np.linalg.norm(embeddings[0])
         assert abs(norm - 1.0) < 1e-5
+
+
+class TestGetModelThreadSafety:
+    def setup_method(self):
+        reset_model()
+
+    def teardown_method(self):
+        reset_model()
+
+    def test_concurrent_get_model_loads_once(self):
+        """Two threads calling get_model simultaneously must not double-load the model."""
+        import threading
+        from alaya.index import embedder as embedder_mod
+
+        load_count = []
+        original_embedding_cls = None
+
+        mock_model = MagicMock()
+        mock_model.embed.return_value = iter([])
+
+        barrier = threading.Barrier(2)
+
+        def patched_load(name, **kwargs):
+            load_count.append(1)
+            return mock_model
+
+        with patch("fastembed.TextEmbedding", side_effect=patched_load):
+            def call_get_model():
+                barrier.wait()
+                embedder_mod.get_model()
+
+            t1 = threading.Thread(target=call_get_model)
+            t2 = threading.Thread(target=call_get_model)
+            t1.start(); t2.start()
+            t1.join(); t2.join()
+
+        assert len(load_count) == 1, f"Model loaded {len(load_count)} times, expected 1"
+
+    def test_reset_model_clears_cache(self):
+        """reset_model must allow the model to be reloaded on next call."""
+        mock_model = MagicMock()
+        mock_model.embed.return_value = iter([])
+
+        with patch("fastembed.TextEmbedding", return_value=mock_model) as mock_cls:
+            from alaya.index.embedder import get_model
+            get_model()
+            reset_model()
+            get_model()
+            assert mock_cls.call_count == 2
