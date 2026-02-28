@@ -11,6 +11,26 @@ from alaya.tools.write import _validate_directory, _slugify
 _ARCHIVES_DIR = "archives"
 
 
+def _insert_frontmatter_field(content: str, key: str, value: str) -> str:
+    """Insert a key: value field before the closing --- of the frontmatter block.
+
+    If no frontmatter block exists, the content is returned unchanged.
+    """
+    lines = content.splitlines(keepends=True)
+    # find the closing ---
+    in_fm = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "---":
+            if not in_fm:
+                in_fm = True
+            else:
+                # insert just before the closing ---
+                lines.insert(i, f"{key}: {value}\n")
+                return "".join(lines)
+    return content  # no frontmatter found
+
+
 def find_and_replace_wikilinks(old_title: str, new_title: str, vault: Path) -> list[str]:
     """Replace [[old_title]] with [[new_title]] across all markdown files.
 
@@ -118,8 +138,7 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> s
 
     if reason:
         existing = src.read_text()
-        separator = "\n" if existing.endswith("\n") else "\n\n"
-        src.write_text(existing + separator + f"**Archived:** {reason}\n")
+        src.write_text(_insert_frontmatter_field(existing, "archived_reason", reason))
 
     archives_dir = vault / _ARCHIVES_DIR
     archives_dir.mkdir(exist_ok=True)

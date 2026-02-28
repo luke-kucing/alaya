@@ -105,10 +105,15 @@ class TestDeleteNote:
         result = delete_note("ideas/voice-capture.md", vault)
         assert result == "archives/voice-capture.md"
 
-    def test_reason_appended_to_note(self, vault: Path) -> None:
+    def test_reason_written_to_frontmatter(self, vault: Path) -> None:
         delete_note("ideas/voice-capture.md", vault, reason="superseded by voice-pipeline project")
         content = (vault / "archives/voice-capture.md").read_text()
-        assert "superseded by voice-pipeline project" in content
+        # reason must be in frontmatter, not appended to body
+        assert "archived_reason: superseded by voice-pipeline project" in content
+        # frontmatter closes before body content
+        fm_end = content.index("---", 4)  # second --- (first is at 0)
+        reason_pos = content.index("archived_reason")
+        assert reason_pos < fm_end
 
     def test_already_archived_raises(self, vault: Path) -> None:
         # first delete
