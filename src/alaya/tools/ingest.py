@@ -176,6 +176,18 @@ def ingest(
         if not path.is_absolute():
             path = vault / source
 
+        # Reject paths that escape the vault root (traversal or absolute paths
+        # outside the vault such as /etc/passwd or ~/.ssh/id_rsa)
+        try:
+            path.resolve().relative_to(vault.resolve())
+        except ValueError:
+            return IngestResult(
+                title=source.split("/")[-1],
+                source=source,
+                raw_text=f"Path escapes vault root: {source}",
+                chunks_indexed=0,
+            )
+
         suffix = path.suffix.lower()
         resolved_title = title or path.stem
 

@@ -76,37 +76,38 @@ class TestIngestURL:
 
 
 class TestIngestPDF:
-    def test_pdf_extracted_as_markdown(self, vault: Path, tmp_path: Path) -> None:
-        pdf_path = tmp_path / "zero-trust.pdf"
-        pdf_path.write_bytes(b"%PDF-1.4 fake")  # dummy file
+    def test_pdf_extracted_as_markdown(self, vault: Path) -> None:
+        pdf_path = vault / "raw" / "zero-trust.pdf"
+        pdf_path.parent.mkdir(exist_ok=True)
+        pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with patch("alaya.tools.ingest._extract_pdf", return_value=SAMPLE_PDF_MD), \
              patch("alaya.tools.ingest._index_content", return_value=3):
             result = ingest(str(pdf_path), vault=vault)
         assert "Zero Trust" in result.raw_text or "Zero trust" in result.raw_text
 
-    def test_scanned_pdf_returns_error(self, vault: Path, tmp_path: Path) -> None:
-        pdf_path = tmp_path / "scanned.pdf"
+    def test_scanned_pdf_returns_error(self, vault: Path) -> None:
+        pdf_path = vault / "raw" / "scanned.pdf"
+        pdf_path.parent.mkdir(exist_ok=True)
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with patch("alaya.tools.ingest._extract_pdf", return_value=""):
             result = ingest(str(pdf_path), vault=vault)
         assert "scanned" in result.raw_text.lower() or result.chunks_indexed == 0
 
-    def test_scanned_pdf_message_includes_char_count(self, vault: Path, tmp_path: Path) -> None:
-        pdf_path = tmp_path / "sparse.pdf"
+    def test_scanned_pdf_message_includes_char_count(self, vault: Path) -> None:
+        pdf_path = vault / "raw" / "sparse.pdf"
+        pdf_path.parent.mkdir(exist_ok=True)
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with patch("alaya.tools.ingest._extract_pdf", return_value="short"):
             result = ingest(str(pdf_path), vault=vault)
         assert "5 chars extracted" in result.raw_text
 
-    def test_pdf_with_sufficient_text_is_not_flagged_as_scanned(self, vault: Path, tmp_path: Path) -> None:
-        pdf_path = tmp_path / "real.pdf"
+    def test_pdf_with_sufficient_text_is_not_flagged_as_scanned(self, vault: Path) -> None:
+        pdf_path = vault / "raw" / "real.pdf"
+        pdf_path.parent.mkdir(exist_ok=True)
         pdf_path.write_bytes(b"%PDF-1.4 fake")
-        # 120 chars — old threshold (100) would pass, but was too low.
-        # New threshold is 250, so this should still be flagged.
-        # Use > 250 chars to confirm a legitimate PDF is accepted.
         sufficient_text = "A" * 300
 
         with patch("alaya.tools.ingest._extract_pdf", return_value=sufficient_text), \
@@ -276,6 +277,41 @@ class TestFetchUrlSsrf:
         with patch("httpx.get", return_value=mock_response):
             with pytest.raises(ValueError, match="Blocked"):
                 _fetch_url("https://example.com/redirect-me")
+
+
+class TestIngestPathTraversal:
+    """ingest() must reject file paths that escape the vault root."""
+
+    def test_absolute_path_outside_vault_blocked(self, vault: Path) -> None:
+        result = ingest("/etc/passwd", vault=vault)
+        assert result.chunks_indexed == 0
+        assert "escapes vault root" in result.raw_text
+
+    def test_relative_traversal_outside_vault_blocked(self, vault: Path) -> None:
+        result = ingest("../../etc/passwd", vault=vault)
+        assert result.chunks_indexed == 0
+        assert "escapes vault root" in result.raw_text
+
+    def test_absolute_path_inside_vault_allowed(self, vault: Path) -> None:
+        abs_path = str(vault / "projects/second-brain.md")
+        with patch("alaya.tools.ingest._index_content", return_value=2), \
+             patch("alaya.tools.ingest._find_suggested_links", return_value=[]):
+            result = ingest(abs_path, vault=vault)
+        assert result.chunks_indexed == 2
+
+    def test_relative_path_inside_vault_allowed(self, vault: Path) -> None:
+        with patch("alaya.tools.ingest._index_content", return_value=3), \
+             patch("alaya.tools.ingest._find_suggested_links", return_value=[]):
+            result = ingest("projects/second-brain.md", vault=vault)
+        assert result.chunks_indexed == 3
+
+    def test_ssh_key_path_blocked(self, vault: Path, tmp_path: Path) -> None:
+        # simulate an absolute path clearly outside the vault
+        outside = tmp_path / "id_rsa"
+        outside.write_text("PRIVATE KEY DATA")
+        result = ingest(str(outside), vault=vault)
+        assert result.chunks_indexed == 0
+        assert "escapes vault root" in result.raw_text
 
 
 class TestIngestDate:
