@@ -100,4 +100,4 @@ class TestRenderFrontmatter:
     def test_value_with_colon(self):
         meta = {"title": "My Note: Sub"}
         result = render_frontmatter(meta)
-        assert "title: My Note: Sub\n" in result
+        assert 'title: "My Note: Sub"\n' in result

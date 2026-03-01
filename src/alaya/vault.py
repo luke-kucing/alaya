@@ -40,11 +40,25 @@ def parse_note(content: str) -> NoteMeta:
     return NoteMeta(title=title, date=date, tags=tags, extra=raw_meta, body=body)
 
 
+_YAML_NEEDS_QUOTING = re.compile(r"[:\#{}\[\],>|&*!?'\"\\`@\n]|^[ \t]|[ \t]$")
+
+
+def _yaml_quote(val: str) -> str:
+    """Quote a YAML value if it contains special characters."""
+    if _YAML_NEEDS_QUOTING.search(val):
+        escaped = val.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return val
+
+
 def render_frontmatter(meta: dict) -> str:
     """Render a dict back to a YAML frontmatter block."""
     lines = ["---"]
     for key, val in meta.items():
-        lines.append(f"{key}: {val}" if val else f"{key}:")
+        if val:
+            lines.append(f"{key}: {_yaml_quote(str(val))}")
+        else:
+            lines.append(f"{key}:")
     lines.append("---\n")
     return "\n".join(lines)
 

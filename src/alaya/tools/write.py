@@ -244,7 +244,8 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
                 continue
             if re.match(r"^(#\w[\w-]* ?)+$", line):
                 tag_line_idx = i
-            break
+                break
+            break  # non-tag non-empty line; no tag line exists
 
         if tag_line_idx is not None:
             existing_tags = set(re.findall(r"#([\w-]+)", lines[tag_line_idx]))
