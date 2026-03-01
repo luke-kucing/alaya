@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -221,16 +222,25 @@ def hybrid_search(
 
 
 _store_cache: dict[Path, VaultStore] = {}
+_store_lock = threading.Lock()
 
 
 def get_store(vault: Path) -> VaultStore:
-    """Return the VaultStore for a given vault root, creating it once per process."""
+    """Return the VaultStore for a given vault root, creating it once per process.
+
+    Uses double-checked locking so the common path (cache hit) avoids lock
+    overhead while concurrent first-time calls still produce exactly one instance.
+    """
     resolved = vault.resolve()
-    if resolved not in _store_cache:
-        _store_cache[resolved] = VaultStore(db_path=resolved / ".zk" / "vectors")
-    return _store_cache[resolved]
+    if resolved in _store_cache:
+        return _store_cache[resolved]
+    with _store_lock:
+        if resolved not in _store_cache:
+            _store_cache[resolved] = VaultStore(db_path=resolved / ".zk" / "vectors")
+        return _store_cache[resolved]
 
 
 def reset_store() -> None:
     """Clear the store cache. Intended for use in tests only."""
-    _store_cache.clear()
+    with _store_lock:
+        _store_cache.clear()

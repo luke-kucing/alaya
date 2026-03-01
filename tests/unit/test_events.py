@@ -86,3 +86,46 @@ class TestUpdateMetadata:
         rows = store._get_table().search().limit(100).to_list()
         assert rows[0]["path"] == "notes/b.md"
         assert rows[0]["title"] == "Original"  # unchanged
+
+
+class TestEventThreadSafety:
+    def setup_method(self):
+        clear_listeners()
+
+    def test_registering_listener_from_within_callback_does_not_crash(self):
+        """A listener that registers another listener during emit must not raise."""
+        registered_during_emit = []
+
+        def callback(event):
+            # register a new listener while emit() is iterating
+            on_note_change(lambda e: registered_during_emit.append(e))
+
+        on_note_change(callback)
+        emit(NoteEvent("created", "notes/test.md"))  # must not raise
+
+    def test_concurrent_emit_and_register_no_crash(self):
+        """Concurrent emit() and on_note_change() from different threads must not crash."""
+        import threading
+        errors = []
+
+        def register():
+            try:
+                for _ in range(50):
+                    on_note_change(lambda e: None)
+            except Exception as e:
+                errors.append(e)
+
+        def fire():
+            try:
+                for _ in range(50):
+                    emit(NoteEvent("modified", "notes/foo.md"))
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=register), threading.Thread(target=fire)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Concurrent emit/register raised: {errors}"
