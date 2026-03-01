@@ -7,6 +7,12 @@ from alaya.vault import resolve_note_path, parse_note
 from alaya.zk import run_zk, ZKError, _reject_flag
 
 
+def _tsv(line: str, count: int) -> tuple[str, ...]:
+    """Split a TSV line and return exactly *count* fields, padding with empty strings."""
+    parts = line.split("\t")
+    return tuple(parts[i] if i < len(parts) else "" for i in range(count))
+
+
 def _run_reindex(vault: Path):
     from alaya.index.reindex import reindex_all
     return reindex_all(vault)
@@ -125,11 +131,7 @@ def list_notes(
 
     rows = []
     for line in raw.splitlines():
-        parts = line.split("\t")
-        path = parts[0] if len(parts) > 0 else ""
-        title = parts[1] if len(parts) > 1 else ""
-        date_str = parts[2] if len(parts) > 2 else ""
-        tags = parts[3] if len(parts) > 3 else ""
+        path, title, date_str, tags = _tsv(line, 4)
         rows.append(f"| [[{title}]] | `{path}` | {date_str} | {tags} |")
 
     header = "| Title | Path | Date | Tags |\n|---|---|---|---|"
@@ -149,10 +151,8 @@ def get_backlinks(relative_path: str, vault: Path) -> str:
 
     lines = []
     for line in raw.splitlines():
-        parts = line.split("\t")
-        path = parts[0] if len(parts) > 0 else ""
-        title = parts[1] if len(parts) > 1 else path
-        lines.append(f"- [[{title}]] (`{path}`)")
+        path, title = _tsv(line, 2)
+        lines.append(f"- [[{title or path}]] (`{path}`)")
 
     return "\n".join(lines)
 
@@ -170,10 +170,8 @@ def get_links(relative_path: str, vault: Path) -> str:
 
     lines = []
     for line in raw.splitlines():
-        parts = line.split("\t")
-        path = parts[0] if len(parts) > 0 else ""
-        title = parts[1] if len(parts) > 1 else path
-        lines.append(f"- [[{title}]] (`{path}`)")
+        path, title = _tsv(line, 2)
+        lines.append(f"- [[{title or path}]] (`{path}`)")
 
     return "\n".join(lines)
 
@@ -186,10 +184,8 @@ def get_tags(vault: Path) -> str:
 
     rows = []
     for line in raw.splitlines():
-        parts = line.split("\t")
-        name = parts[0] if len(parts) > 0 else ""
-        count = parts[1] if len(parts) > 1 else "0"
-        rows.append(f"| #{name} | {count} |")
+        name, count = _tsv(line, 2)
+        rows.append(f"| #{name} | {count or '0'} |")
 
     header = "| Tag | Notes |\n|---|---|"
     return header + "\n" + "\n".join(rows)

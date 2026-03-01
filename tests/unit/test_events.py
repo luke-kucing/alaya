@@ -1,7 +1,7 @@
 """Tests for the event system used by write-through index updates."""
 import pytest
 
-from alaya.events import NoteEvent, on_note_change, emit, clear_listeners
+from alaya.events import NoteEvent, EventType, on_note_change, emit, clear_listeners
 
 
 class TestEventSystem:
@@ -11,33 +11,33 @@ class TestEventSystem:
     def test_emit_calls_registered_listener(self):
         received = []
         on_note_change(lambda event: received.append(event))
-        emit(NoteEvent("created", "notes/test.md"))
+        emit(NoteEvent(EventType.CREATED, "notes/test.md"))
         assert len(received) == 1
-        assert received[0].event_type == "created"
+        assert received[0].event_type == EventType.CREATED
         assert received[0].path == "notes/test.md"
 
     def test_multiple_listeners_all_called(self):
         calls_a, calls_b = [], []
         on_note_change(lambda e: calls_a.append(e.event_type))
         on_note_change(lambda e: calls_b.append(e.event_type))
-        emit(NoteEvent("modified", "notes/foo.md"))
-        assert calls_a == ["modified"]
-        assert calls_b == ["modified"]
+        emit(NoteEvent(EventType.MODIFIED, "notes/foo.md"))
+        assert calls_a == [EventType.MODIFIED]
+        assert calls_b == [EventType.MODIFIED]
 
     def test_clear_listeners(self):
         received = []
         on_note_change(lambda e: received.append(e))
         clear_listeners()
-        emit(NoteEvent("created", "notes/test.md"))
+        emit(NoteEvent(EventType.CREATED, "notes/test.md"))
         assert received == []
 
     def test_no_listeners_does_not_raise(self):
-        emit(NoteEvent("deleted", "notes/gone.md"))  # should not raise
+        emit(NoteEvent(EventType.DELETED, "notes/gone.md"))  # should not raise
 
     def test_moved_event_has_old_path(self):
         received = []
         on_note_change(lambda e: received.append(e))
-        emit(NoteEvent("moved", "notes/new.md", old_path="notes/old.md"))
+        emit(NoteEvent(EventType.MOVED, "notes/new.md", old_path="notes/old.md"))
         assert received[0].old_path == "notes/old.md"
         assert received[0].path == "notes/new.md"
 
@@ -101,7 +101,7 @@ class TestEventThreadSafety:
             on_note_change(lambda e: registered_during_emit.append(e))
 
         on_note_change(callback)
-        emit(NoteEvent("created", "notes/test.md"))  # must not raise
+        emit(NoteEvent(EventType.CREATED, "notes/test.md"))  # must not raise
 
     def test_concurrent_emit_and_register_no_crash(self):
         """Concurrent emit() and on_note_change() from different threads must not crash."""
@@ -118,7 +118,7 @@ class TestEventThreadSafety:
         def fire():
             try:
                 for _ in range(50):
-                    emit(NoteEvent("modified", "notes/foo.md"))
+                    emit(NoteEvent(EventType.MODIFIED, "notes/foo.md"))
             except Exception as e:
                 errors.append(e)
 

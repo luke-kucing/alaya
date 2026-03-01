@@ -6,28 +6,17 @@ from alaya.errors import SECTION_NOT_FOUND
 
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, ALREADY_EXISTS, OUTSIDE_VAULT, INVALID_ARGUMENT
-from alaya.events import emit, NoteEvent
+from alaya.events import emit, NoteEvent, EventType
 from alaya.vault import resolve_note_path
 from alaya.tools._locks import get_path_lock, atomic_write
 
-# Directories considered valid targets for note creation
-_VALID_DIRS = {
-    "daily", "inbox", "projects", "areas", "people",
-    "ideas", "learning", "resources", "raw", "archives",
-}
-
-
 def _validate_directory(directory: str, vault: Path) -> Path:
-    """Resolve directory inside vault and reject traversal or unknown dirs."""
+    """Resolve directory inside vault and reject path traversal."""
     target = (vault / directory).resolve()
     try:
         target.relative_to(vault.resolve())
     except ValueError:
         raise ValueError(f"Directory '{directory}' escapes vault root")
-    # allow any subpath under a known top-level dir
-    top = target.relative_to(vault.resolve()).parts[0] if target != vault.resolve() else ""
-    if top not in _VALID_DIRS:
-        raise ValueError(f"Unknown vault directory '{top}'. Expected one of: {sorted(_VALID_DIRS)}")
     return target
 
 
@@ -83,7 +72,7 @@ def create_note(
         atomic_write(file_path, "\n".join(content_parts) + "\n")
 
     relative = str(file_path.relative_to(vault))
-    emit(NoteEvent("created", relative))
+    emit(NoteEvent(EventType.CREATED, relative))
     return relative
 
 
@@ -113,7 +102,7 @@ def append_to_note(
         if section_header is None:
             separator = "\n" if existing.endswith("\n") else "\n\n"
             atomic_write(path, existing + separator + text + "\n")
-            emit(NoteEvent("modified", relative_path))
+            emit(NoteEvent(EventType.MODIFIED, relative_path))
             return
 
         # Insert under the named section, before the next ## heading or EOF
@@ -137,7 +126,7 @@ def append_to_note(
         new_lines = lines[:insert_at] + ["\n", text + "\n"] + lines[insert_at:]
         atomic_write(path, "".join(new_lines))
 
-    emit(NoteEvent("modified", relative_path))
+    emit(NoteEvent(EventType.MODIFIED, relative_path))
 
 
 def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Path) -> None:
@@ -198,7 +187,7 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
 
         atomic_write(path, "\n".join(lines) + "\n")
 
-    emit(NoteEvent("modified", relative_path))
+    emit(NoteEvent(EventType.MODIFIED, relative_path))
 
 
 # --- FastMCP tool registration ---
