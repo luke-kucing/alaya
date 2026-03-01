@@ -59,16 +59,26 @@ def reindex_all(vault_root: Path, store=None) -> ReindexResult:
 def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
     """Reindex only files that have changed since the last run.
 
-    Uses a JSON state file (.zk/index_state.json) to track mtime and content hash
-    per file. Skips files where mtime is unchanged (fast path), or where mtime
-    changed but hash is the same (touch without content change). Cleans up
-    deleted files from the index.
+    Uses a JSON state file (.zk/index_state.json) to track mtime, content hash,
+    and active embedding model per file. If the active model has changed since the
+    last run, all files are treated as dirty and re-embedded. Cleans up deleted
+    files from the index.
     """
+    from alaya.index.models import get_active_model
+    active_model = get_active_model().name
+
     if store is None:
         store = get_store(vault_root)
 
     state_file = vault_root / ".zk" / "index_state.json"
-    prev_state: dict = json.loads(state_file.read_text()) if state_file.exists() else {}
+    raw_state: dict = json.loads(state_file.read_text()) if state_file.exists() else {}
+
+    # State file format: {"_model": "...", "files": {rel_path: {mtime, hash}}}
+    # Legacy format (flat dict of paths) is also accepted.
+    stored_model = raw_state.get("_model")
+    prev_files: dict = raw_state.get("files", raw_state if "_model" not in raw_state else {})
+    model_changed = stored_model is not None and stored_model != active_model
+    prev_state = {} if model_changed else prev_files
 
     new_state: dict = {}
     notes_indexed = 0
@@ -110,12 +120,13 @@ def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
         new_state[rel] = {"mtime": mtime, "hash": file_hash}
 
     # Remove index entries for files no longer in the vault
-    deleted = set(prev_state) - set(new_state)
+    # Compare against prev_files (not prev_state, which is empty on model change)
+    deleted = set(prev_files) - set(new_state)
     for old_path in deleted:
         delete_note_from_index(old_path, store)
 
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(new_state, indent=2))
+    state_file.write_text(json.dumps({"_model": active_model, "files": new_state}, indent=2))
 
     duration = time.monotonic() - start
     return ReindexResult(
@@ -125,3 +136,60 @@ def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
         notes_skipped=notes_skipped,
         notes_deleted=len(deleted),
     )
+
+
+_REEMBED_BATCH = 20      # notes per batch
+_REEMBED_SLEEP = 0.5     # seconds between batches
+
+
+def reembed_background(vault_root: Path, from_model: str, to_model: str, store=None) -> None:
+    """Re-embed all notes in batches as a background migration.
+
+    Called in a daemon thread when the active embedding model changes.
+    Updates health.py migration progress so vault_health can report it.
+    On completion writes an updated state file so incremental reindex
+    knows everything is current.
+    """
+    import logging
+    from alaya.index import health
+
+    logger = logging.getLogger(__name__)
+
+    if store is None:
+        store = get_store(vault_root)
+
+    md_files = list(_iter_vault_md(vault_root))
+    total = len(md_files)
+    health.start_migration(from_model, to_model, total)
+    logger.info("Background re-embed started: %s -> %s (%d notes)", from_model, to_model, total)
+
+    done = 0
+    new_state: dict = {}
+
+    for i in range(0, total, _REEMBED_BATCH):
+        batch = md_files[i:i + _REEMBED_BATCH]
+        for md_file in batch:
+            rel = str(md_file.relative_to(vault_root))
+            try:
+                mtime = md_file.stat().st_mtime
+                content = md_file.read_text()
+                chunks = chunk_note(rel, content)
+                if chunks:
+                    embeddings = embed_chunks(chunks)
+                    upsert_note(rel, chunks, embeddings, store)
+                new_state[rel] = {"mtime": mtime, "hash": _file_hash(md_file)}
+                done += 1
+            except Exception as e:
+                logger.warning("Re-embed failed for %s: %s", rel, e)
+
+        health.update_migration_progress(done)
+        if i + _REEMBED_BATCH < total:
+            time.sleep(_REEMBED_SLEEP)
+
+    # Write updated state file
+    state_file = vault_root / ".zk" / "index_state.json"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps({"_model": to_model, "files": new_state}, indent=2))
+
+    health.finish_migration()
+    logger.info("Background re-embed complete: %d/%d notes", done, total)

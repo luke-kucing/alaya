@@ -133,6 +133,30 @@ def _check_zk() -> None:
         raise SystemExit(1)
 
 
+def _maybe_start_reembed(vault_root, store) -> None:
+    """Start background re-embed if the active embedding model differs from the index."""
+    import threading
+    from alaya.index.store import get_index_model
+    from alaya.index.models import get_active_model
+    from alaya.index.reindex import reembed_background
+
+    stored = get_index_model(store)
+    active = get_active_model().name
+    if stored is None or stored == active:
+        return
+
+    logger.warning(
+        "Embedding model changed: %s -> %s. Starting background re-embed.", stored, active
+    )
+    t = threading.Thread(
+        target=reembed_background,
+        args=(vault_root, stored, active, store),
+        daemon=True,
+        name="alaya-reembed",
+    )
+    t.start()
+
+
 def main() -> None:
     _check_zk()
 
@@ -147,13 +171,16 @@ def main() -> None:
     _register_all(vault_root)
     _register_health_tool(vault_root)
 
-    from alaya.index.store import get_store
+    from alaya.index.store import get_store, get_index_model
+    from alaya.index.models import get_active_model
     from alaya.watcher import start_watcher
 
     store = get_store(vault_root)
     observer, handler = start_watcher(vault_root, store)
     _register_index_listener(vault_root, watcher_handler=handler)
     logger.info("File watcher started")
+
+    _maybe_start_reembed(vault_root, store)
 
     try:
         mcp.run()
