@@ -1,0 +1,43 @@
+name: SAST (Semgrep)
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    # Weekly scan on Monday at 08:00 UTC
+    - cron: "0 8 * * 1"
+
+jobs:
+  semgrep:
+    name: Semgrep scan
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    # Skip on PRs from forks to avoid secret exposure
+    if: github.actor != 'dependabot[bot]'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep (OSS rules)
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/owasp-top-ten \
+            --config p/secrets \
+            --config .semgrep/ \
+            --error \
+            --sarif-output semgrep.sarif \
+            src/
+        env:
+          # Optional: publish results to semgrep.dev dashboard
+          # SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+        continue-on-error: true  # SARIF upload requires Code Scanning to be enabled
