@@ -55,7 +55,10 @@ _VALID_TAG_RE = re.compile(r"^[\w-]+$")
 
 def _load_template(vault: Path, name: str) -> str | None:
     """Load a template file from vault/templates/{name}.md, or None if not found."""
-    path = vault / "templates" / f"{name}.md"
+    templates_dir = (vault / "templates").resolve()
+    path = (templates_dir / f"{name}.md").resolve()
+    if not path.is_relative_to(templates_dir):
+        raise ValueError(f"Template name {name!r} escapes templates directory")
     try:
         return path.read_text() if path.exists() else None
     except OSError:
