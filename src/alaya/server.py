@@ -1,4 +1,5 @@
 import logging
+import subprocess
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -120,7 +121,19 @@ def _register_health_tool(vault: Path) -> None:
         return "\n".join(lines)
 
 
+def _check_zk() -> None:
+    """Verify zk is installed and log its version. Exits with a clear message if not found."""
+    try:
+        result = subprocess.run(["zk", "--version"], capture_output=True, text=True, timeout=5)
+        logger.info("zk version: %s", result.stdout.strip())
+    except FileNotFoundError:
+        logger.error("zk CLI not found — install from: https://github.com/zk-org/zk")
+        raise SystemExit(1)
+
+
 def main() -> None:
+    _check_zk()
+
     try:
         vault_root = get_vault_root()
     except ConfigError as e:
