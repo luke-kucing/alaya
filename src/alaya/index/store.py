@@ -202,6 +202,7 @@ def hybrid_search(
     store: VaultStore,
     directory: str | None = None,
     tags: list[str] | None = None,
+    since: str | None = None,
     limit: int = 10,
 ) -> list[dict]:
     """Vector ANN search with optional metadata pre-filter.
@@ -223,6 +224,8 @@ def hybrid_search(
             for tag in tags:
                 # tags column is comma-separated; match as substring
                 filters.append(f"tags LIKE '%{_sq_like(tag)}%'")
+        if since:
+            filters.append(f"modified_date >= '{_sq(since)}'")
         if filters:
             q = q.where(" AND ".join(filters))
 

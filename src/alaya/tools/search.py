@@ -20,6 +20,7 @@ def _run_hybrid_search(
     vault: Path,
     directory: str | None = None,
     tags: list[str] | None = None,
+    since: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
     """Embed the query and run hybrid search against LanceDB."""
@@ -28,7 +29,7 @@ def _run_hybrid_search(
 
     query_embedding = embed_query(query)
     store = get_store(vault)
-    return hybrid_search(query, query_embedding, store, directory=directory, tags=tags, limit=limit)
+    return hybrid_search(query, query_embedding, store, directory=directory, tags=tags, since=since, limit=limit)
 
 
 def search_notes(
@@ -45,7 +46,7 @@ def search_notes(
     zk keyword search otherwise.
     """
     if _hybrid_search_available(vault):
-        results = _run_hybrid_search(query, vault, directory=directory, tags=tags, limit=limit)
+        results = _run_hybrid_search(query, vault, directory=directory, tags=tags, since=since, limit=limit)
         if not results:
             return "No notes matching that query."
         rows = [
