@@ -57,3 +57,27 @@ def test_subsequent_failure_overwrites_previous_error():
     health.record_failure("projects/foo.md", "second error")
     status = health.get_status()
     assert status["failed_paths"]["projects/foo.md"] == "second error"
+
+
+def test_concurrent_access_no_data_race():
+    """10 threads hammering record_failure/record_success/get_status must not crash."""
+    import threading
+
+    errors = []
+
+    def worker(i):
+        try:
+            for _ in range(50):
+                health.record_failure(f"path{i}.md", "err")
+                health.record_success(f"path{i}.md")
+                health.get_status()
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Concurrent health access raised: {errors}"

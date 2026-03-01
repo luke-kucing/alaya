@@ -4,7 +4,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.vault import resolve_note_path, parse_note
-from alaya.zk import run_zk, ZKError
+from alaya.zk import run_zk, ZKError, _reject_flag
 
 
 def _run_reindex(vault: Path):
@@ -106,18 +106,18 @@ def list_notes(
     args = ["list", "--format", "{{path}}\t{{title}}\t{{format-date created '%Y-%m-%d'}}\t{{tags}}", "--limit", str(limit)]
 
     if tag:
-        args += ["--tag", tag]
+        args += ["--tag", _reject_flag(tag, "tag")]
     if since:
-        args += ["--modified-after", since]
+        args += ["--modified-after", _reject_flag(since, "since")]
     if recent is not None:
         cutoff = (date.today() - timedelta(days=recent)).isoformat()
         args += ["--modified-after", cutoff]
     if until:
-        args += ["--modified-before", until]
+        args += ["--modified-before", _reject_flag(until, "until")]
     if sort:
-        args += ["--sort", sort]
+        args += ["--sort", _reject_flag(sort, "sort")]
     if directory:
-        args.append(directory)
+        args += ["--", _reject_flag(directory, "directory")]
 
     raw = run_zk(args, vault)
     if not raw:

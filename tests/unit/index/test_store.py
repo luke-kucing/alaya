@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from alaya.index.embedder import Chunk, chunk_note
-from alaya.index.store import upsert_note, delete_note_from_index, hybrid_search, VaultStore, get_store, reset_store, _sq
+from alaya.index.store import upsert_note, delete_note_from_index, hybrid_search, VaultStore, get_store, reset_store, _sq, _sq_like
 
 
 def _make_chunks(path: str, text: str = "Some content about kubernetes and helm.") -> list[Chunk]:
@@ -192,3 +192,28 @@ class TestSqlEscape:
 
     def test_backslash_untouched(self):
         assert _sq("path\\to\\file") == "path\\to\\file"
+
+
+class TestSqlLikeEscape:
+    """_sq_like must escape LIKE wildcards in addition to single quotes."""
+
+    def test_plain_string_unchanged(self):
+        assert _sq_like("kubernetes") == "kubernetes"
+
+    def test_percent_escaped(self):
+        assert _sq_like("%") == "\\%"
+
+    def test_underscore_escaped(self):
+        assert _sq_like("_") == "\\_"
+
+    def test_single_quote_doubled(self):
+        assert _sq_like("it's") == "it''s"
+
+    def test_combined_wildcards_and_quote(self):
+        assert _sq_like("%_it's_%") == "\\%\\_it''s\\_\\%"
+
+    def test_empty_string(self):
+        assert _sq_like("") == ""
+
+    def test_normal_tag_unchanged(self):
+        assert _sq_like("kubernetes") == "kubernetes"

@@ -33,6 +33,19 @@ def _sq(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _sq_like(value: str) -> str:
+    """Escape a string for use inside a SQL LIKE pattern.
+
+    Escapes single quotes (SQL string delimiter) and LIKE wildcards
+    (% = any sequence, _ = any single character) so the value is matched
+    literally rather than as a pattern.
+    """
+    escaped = value.replace("'", "''")
+    escaped = escaped.replace("%", "\\%")
+    escaped = escaped.replace("_", "\\_")
+    return escaped
+
+
 @dataclass
 class VaultStore:
     """Thin wrapper around a LanceDB table for the vault index."""
@@ -173,7 +186,7 @@ def hybrid_search(
         if tags:
             for tag in tags:
                 # tags column is comma-separated; match as substring
-                filters.append(f"tags LIKE '%{_sq(tag)}%'")
+                filters.append(f"tags LIKE '%{_sq_like(tag)}%'")
         if filters:
             q = q.where(" AND ".join(filters))
 
