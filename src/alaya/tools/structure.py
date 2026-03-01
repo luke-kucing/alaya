@@ -99,7 +99,8 @@ def move_note(relative_path: str, destination_dir: str, vault: Path) -> str:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
 
-    shutil.move(str(src), str(dest))
+    with get_path_lock(src):
+        shutil.move(str(src), str(dest))
     new_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.MOVED, new_relative, old_path=relative_path))
     return new_relative

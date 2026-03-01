@@ -104,12 +104,10 @@ def extract_section(
         )
 
         # replace section body in original with a wikilink (inline, lock already held)
-        from alaya.tools.write import _slugify
-        slug = _slugify(new_title)
         header_line = lines[start]
         before = lines[:start]
         after = lines[end:]
-        new_lines = before + [header_line, f"[[{slug}]]"] + ([""] if after else []) + after
+        new_lines = before + [header_line, f"[[{new_title}]]"] + ([""] if after else []) + after
         atomic_write(path, "\n".join(new_lines) + "\n")
 
     return new_path

@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from alaya.index.embedder import chunk_note, embed_chunks
 from alaya.index.store import upsert_note, delete_note_from_index, get_store
+from alaya.tools._locks import atomic_write
 from alaya.vault import iter_vault_md as _iter_vault_md
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -112,7 +116,12 @@ def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
             continue
 
         # Content changed — re-embed
-        content = raw_bytes.decode()
+        try:
+            content = raw_bytes.decode()
+        except UnicodeDecodeError:
+            logger.warning("Skipping non-UTF8 file: %s", rel)
+            new_state[rel] = {"mtime": mtime, "hash": file_hash}
+            continue
         chunks = chunk_note(rel, content)
         if chunks:
             embeddings = embed_chunks(chunks)
@@ -129,7 +138,7 @@ def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
         delete_note_from_index(old_path, store)
 
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps({"_model": active_model, "files": new_state}, indent=2))
+    atomic_write(state_file, json.dumps({"_model": active_model, "files": new_state}, indent=2))
 
     duration = time.monotonic() - start
     return ReindexResult(
@@ -175,12 +184,13 @@ def reembed_background(vault_root: Path, from_model: str, to_model: str, store=N
             rel = str(md_file.relative_to(vault_root))
             try:
                 mtime = md_file.stat().st_mtime
-                content = md_file.read_text()
+                raw_bytes = md_file.read_bytes()
+                content = raw_bytes.decode()
                 chunks = chunk_note(rel, content)
                 if chunks:
                     embeddings = embed_chunks(chunks)
                     upsert_note(rel, chunks, embeddings, store)
-                new_state[rel] = {"mtime": mtime, "hash": _bytes_hash(md_file.read_bytes())}
+                new_state[rel] = {"mtime": mtime, "hash": _bytes_hash(raw_bytes)}
                 done += 1
             except Exception as e:
                 logger.warning("Re-embed failed for %s: %s", rel, e)
@@ -192,7 +202,7 @@ def reembed_background(vault_root: Path, from_model: str, to_model: str, store=N
     # Write updated state file
     state_file = vault_root / ".zk" / "index_state.json"
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps({"_model": to_model, "files": new_state}, indent=2))
+    atomic_write(state_file, json.dumps({"_model": to_model, "files": new_state}, indent=2))
 
     health.finish_migration()
     logger.info("Background re-embed complete: %d/%d notes", done, total)

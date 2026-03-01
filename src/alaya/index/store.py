@@ -82,7 +82,7 @@ class VaultStore:
                     ])
                     try:
                         self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
-                    except (pa.ArrowInvalid, Exception):
+                    except (pa.ArrowInvalid, OSError):
                         # Existing table has old schema (no embedding_model column).
                         # Open it as-is — search still works, model tracking is degraded.
                         self._table = db.open_table(_TABLE_NAME)
