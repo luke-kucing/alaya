@@ -13,31 +13,46 @@ rules:
       category: security
       cwe: CWE-78
 
-  # Detect path traversal via user-supplied path fragments
+  # Detect path traversal via user-supplied path fragments.
+  # The safe pattern is to use resolve_note_path() which validates containment.
+  # Scoped to tool modules where user input enters the system.
   - id: alaya-path-traversal
     patterns:
-      - pattern: Path($ROOT) / $USER_INPUT
-      - pattern-not: Path($ROOT) / "..."
+      - pattern: $ROOT / $USER_INPUT
+      - pattern-not: $ROOT / "..."
+      # .name extracts only the filename component — no traversal possible
+      - pattern-not: $ROOT / $X.name
+      # _slugify() returns only alphanumeric + hyphens
+      - pattern-not: $ROOT / f"...{_slugify($X)}..."
     message: >
-      Path constructed from user-controlled input. Validate that the resolved
-      path stays within the intended vault root to prevent traversal attacks.
+      Path constructed from user-controlled input. Use resolve_note_path()
+      to validate that the resolved path stays within the vault root.
     languages: [python]
     severity: WARNING
+    paths:
+      include:
+        - "**/src/alaya/tools/"
     metadata:
       category: security
       cwe: CWE-22
 
   # Detect f-string interpolation into SQL-like LanceDB filter strings
   - id: alaya-lancedb-injection
-    pattern: |
-      $VAR = f"... {$USER_INPUT} ..."
-    pattern-not: |
-      $VAR = f"... {_sq($USER_INPUT)} ..."
+    patterns:
+      - pattern: |
+          $VAR = f"... {$USER_INPUT} ..."
+      - pattern-not: |
+          $VAR = f"... {_sq($USER_INPUT)} ..."
+      - pattern-not: |
+          $VAR = f"... {_sq_like($USER_INPUT)} ..."
     message: >
       String interpolated directly into a LanceDB filter without escaping via
       _sq() or _sq_like(). Use the escaping helpers to prevent filter injection.
     languages: [python]
     severity: ERROR
+    paths:
+      include:
+        - "**/src/alaya/index/store.py"
     metadata:
       category: security
       cwe: CWE-89

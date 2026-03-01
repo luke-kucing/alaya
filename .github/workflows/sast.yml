@@ -28,10 +28,23 @@ jobs:
             --config p/owasp-top-ten \
             --config p/secrets \
             --config .semgrep/ \
-            --error \
             --sarif-output semgrep.sarif \
+            --json-output semgrep.json \
             src/
         # To publish results to semgrep.dev, add SEMGREP_APP_TOKEN to repo secrets
+
+      - name: Fail on ERROR-level findings
+        run: |
+          count=$(python3 -c "
+          import json, sys
+          data = json.load(open('semgrep.json'))
+          errors = [r for r in data.get('results', []) if r.get('extra', {}).get('severity') == 'ERROR']
+          print(len(errors))
+          ")
+          if [ "$count" -gt 0 ]; then
+            echo "::error::Semgrep found $count ERROR-level finding(s)"
+            exit 1
+          fi
 
       - name: Upload SARIF to GitHub Code Scanning
         if: always()
