@@ -6,21 +6,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Top-level vault directories to skip during full-vault scans.
-_SKIP_DIRS = {".zk", ".git", ".venv", "__pycache__"}
-
-
-def _iter_vault_md(vault: Path):
-    """Yield .md files in vault, skipping tooling directories and unreadable files."""
-    for md_file in vault.rglob("*.md"):
-        if any(part in _SKIP_DIRS for part in md_file.parts):
-            continue
-        yield md_file
-
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.events import emit, NoteEvent, EventType
-from alaya.vault import resolve_note_path
+from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md
 from alaya.tools.write import _validate_directory, _slugify
 from alaya.tools._locks import get_path_lock, atomic_write
 

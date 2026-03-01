@@ -9,7 +9,7 @@ from pathlib import Path
 
 from alaya.index.embedder import chunk_note, embed_chunks
 from alaya.index.store import upsert_note, delete_note_from_index, get_store
-from alaya.tools.structure import _iter_vault_md
+from alaya.vault import iter_vault_md as _iter_vault_md
 
 
 @dataclass
@@ -21,8 +21,8 @@ class ReindexResult:
     notes_deleted: int = 0
 
 
-def _file_hash(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _bytes_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def reindex_all(vault_root: Path, store=None) -> ReindexResult:
@@ -101,15 +101,18 @@ def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
             notes_skipped += 1
             continue
 
+        # Read file once for both hash check and embedding
+        raw_bytes = md_file.read_bytes()
+        file_hash = _bytes_hash(raw_bytes)
+
         # Slow path: mtime changed — check hash before paying embedding cost
-        file_hash = _file_hash(md_file)
         if prev and prev.get("hash") == file_hash:
             new_state[rel] = {"mtime": mtime, "hash": file_hash}
             notes_skipped += 1
             continue
 
         # Content changed — re-embed
-        content = md_file.read_text()
+        content = raw_bytes.decode()
         chunks = chunk_note(rel, content)
         if chunks:
             embeddings = embed_chunks(chunks)
@@ -177,7 +180,7 @@ def reembed_background(vault_root: Path, from_model: str, to_model: str, store=N
                 if chunks:
                     embeddings = embed_chunks(chunks)
                     upsert_note(rel, chunks, embeddings, store)
-                new_state[rel] = {"mtime": mtime, "hash": _file_hash(md_file)}
+                new_state[rel] = {"mtime": mtime, "hash": _bytes_hash(md_file.read_bytes())}
                 done += 1
             except Exception as e:
                 logger.warning("Re-embed failed for %s: %s", rel, e)

@@ -137,7 +137,7 @@ def push_external(
 
 def _find_note_by_url(url: str, vault: Path) -> str | None:
     """Return the relative path of the first note containing the URL, or None."""
-    from alaya.tools.structure import _iter_vault_md
+    from alaya.vault import iter_vault_md as _iter_vault_md
     for md_file in _iter_vault_md(vault):
         try:
             if url in md_file.read_text():

@@ -53,6 +53,10 @@ class VaultStore:
     db_path: Path
     _db: Any = None
     _table: Any = None
+    _init_lock: threading.Lock = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        self._init_lock = threading.Lock()
 
     def _connect(self) -> Any:
         if self._db is None:
@@ -62,24 +66,26 @@ class VaultStore:
 
     def _get_table(self) -> Any:
         if self._table is None:
-            db = self._connect()
-            schema = pa.schema([
-                pa.field("path", pa.string()),
-                pa.field("title", pa.string()),
-                pa.field("directory", pa.string()),
-                pa.field("tags", pa.string()),  # comma-separated
-                pa.field("modified_date", pa.string()),
-                pa.field("chunk_index", pa.int32()),
-                pa.field("text", pa.string()),
-                pa.field("vector", pa.list_(pa.float32(), _get_dim())),
-                pa.field("embedding_model", pa.string()),
-            ])
-            try:
-                self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
-            except (pa.ArrowInvalid, Exception):
-                # Existing table has old schema (no embedding_model column).
-                # Open it as-is — search still works, model tracking is degraded.
-                self._table = db.open_table(_TABLE_NAME)
+            with self._init_lock:
+                if self._table is None:
+                    db = self._connect()
+                    schema = pa.schema([
+                        pa.field("path", pa.string()),
+                        pa.field("title", pa.string()),
+                        pa.field("directory", pa.string()),
+                        pa.field("tags", pa.string()),  # comma-separated
+                        pa.field("modified_date", pa.string()),
+                        pa.field("chunk_index", pa.int32()),
+                        pa.field("text", pa.string()),
+                        pa.field("vector", pa.list_(pa.float32(), _get_dim())),
+                        pa.field("embedding_model", pa.string()),
+                    ])
+                    try:
+                        self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
+                    except (pa.ArrowInvalid, Exception):
+                        # Existing table has old schema (no embedding_model column).
+                        # Open it as-is — search still works, model tracking is degraded.
+                        self._table = db.open_table(_TABLE_NAME)
         return self._table
 
     def count(self) -> int:

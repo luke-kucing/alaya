@@ -76,11 +76,12 @@ class VaultEventHandler(FileSystemEventHandler):
 
     def _debounced_upsert(self, src_path: str) -> None:
         """Schedule an upsert with debounce — resets the timer on repeated events."""
-        if src_path in self._timers:
-            self._timers[src_path].cancel()
-        timer = threading.Timer(self._debounce_seconds, self._do_upsert, args=[src_path])
-        self._timers[src_path] = timer
-        timer.start()
+        with self._lock:
+            if src_path in self._timers:
+                self._timers[src_path].cancel()
+            timer = threading.Timer(self._debounce_seconds, self._do_upsert, args=[src_path])
+            self._timers[src_path] = timer
+            timer.start()
 
     def _do_upsert(self, src_path: str) -> None:
         self._timers.pop(src_path, None)
