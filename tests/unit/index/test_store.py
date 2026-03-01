@@ -217,3 +217,34 @@ class TestSqlLikeEscape:
 
     def test_normal_tag_unchanged(self):
         assert _sq_like("kubernetes") == "kubernetes"
+
+
+class TestGetStoreConcurrency:
+    """get_store() must return the same instance under concurrent first-time calls."""
+
+    def test_concurrent_get_store_returns_same_instance(self, tmp_path):
+        import threading
+        from alaya.index.store import get_store, reset_store
+
+        reset_store()
+        results = []
+        errors = []
+        barrier = threading.Barrier(10)
+
+        def fetch():
+            try:
+                barrier.wait()
+                results.append(get_store(tmp_path))
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=fetch) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        # All threads must have received the exact same instance
+        assert len(results) == 10
+        assert all(s is results[0] for s in results), "Multiple VaultStore instances created"
