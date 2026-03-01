@@ -22,7 +22,7 @@ mcp = FastMCP(
 
 # Explicit registration: server -> tools (one direction only).
 # vault is resolved once here and closed over in each tool wrapper.
-from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, stats  # noqa: E402
+from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, stats, graph  # noqa: E402
 
 def _register_all(vault: Path) -> None:
     read._register(mcp, vault)
@@ -35,6 +35,7 @@ def _register_all(vault: Path) -> None:
     external._register(mcp, vault)
     ingest._register(mcp, vault)
     stats._register(mcp, vault)
+    graph._register(mcp, vault)
 
 
 def _register_index_listener(vault: Path, watcher_handler=None) -> None:
