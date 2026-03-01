@@ -36,7 +36,7 @@ def vault_stats(vault: Path) -> str:
     try:
         from alaya.index.store import get_store
         store = get_store(vault)
-        chunk_count = len(store._get_table().search().limit(100_000).to_list())
+        chunk_count = store.count()
     except Exception:
         pass
 

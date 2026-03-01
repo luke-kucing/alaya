@@ -14,11 +14,20 @@ _INGESTIBLE_SUFFIXES = {".pdf", ".md", ".txt"}
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 
+_BLOCKED_HOSTNAMES = frozenset({
+    "localhost",
+    "metadata.google.internal",
+    "metadata.internal",
+    "instance-data",
+})
+
+
 def _validate_url(url: str) -> None:
     """Reject non-HTTP schemes and private/loopback/link-local IP destinations.
 
     Called before making a request and again after redirect resolution so that
-    open redirects to internal addresses are also caught.
+    open redirects to internal addresses are also caught. Also blocks known
+    internal hostnames (localhost, cloud metadata endpoints).
 
     Raises ValueError for any disallowed URL.
     """
@@ -29,15 +38,30 @@ def _validate_url(url: str) -> None:
     hostname = parsed.hostname
     if not hostname:
         raise ValueError(f"No hostname in URL: {url}")
+
+    # Block known internal hostnames
+    lower_host = hostname.lower()
+    if lower_host in _BLOCKED_HOSTNAMES or lower_host.endswith(".internal"):
+        raise ValueError(f"Blocked internal hostname: {hostname}")
+
+    # Block private/loopback/link-local IP addresses
+    import socket
     try:
         addr = ipaddress.ip_address(hostname)
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-            raise ValueError(f"Blocked private/internal IP address: {hostname}")
-    except ValueError as exc:
-        # re-raise only our own errors; a non-IP hostname raises ValueError in
-        # ipaddress.ip_address() which we intentionally swallow here
-        if "Blocked" in str(exc):
-            raise
+    except ValueError:
+        # hostname is a DNS name — resolve it and check the IP
+        try:
+            resolved = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+            for family, _, _, _, sockaddr in resolved:
+                addr = ipaddress.ip_address(sockaddr[0])
+                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                    raise ValueError(f"Blocked private/internal IP address: {hostname} resolves to {addr}")
+        except socket.gaierror:
+            pass  # DNS resolution failed — let httpx handle the error
+        return
+
+    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+        raise ValueError(f"Blocked private/internal IP address: {hostname}")
 # Minimum extracted characters before a PDF is considered scanned.
 # 250 chars is conservative (~2 short sentences) and avoids false-positives
 # on sparse-but-valid PDFs like slide decks or cover pages.

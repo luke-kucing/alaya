@@ -1,10 +1,14 @@
 """Task tools: get_todos, complete_todo."""
+import logging
 import re
 from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT
 from alaya.vault import resolve_note_path
+from alaya.tools._locks import get_path_lock, atomic_write
+
+logger = logging.getLogger(__name__)
 
 _TODO_PATTERN = re.compile(r"^- \[ \] (.+)$")
 
@@ -17,7 +21,16 @@ def get_todos(
     results = []
 
     if directories:
-        search_roots = [vault / d for d in directories]
+        # Validate directories stay within vault root
+        search_roots = []
+        vault_resolved = vault.resolve()
+        for d in directories:
+            root = (vault / d).resolve()
+            try:
+                root.relative_to(vault_resolved)
+            except ValueError:
+                raise ValueError(f"Directory '{d}' escapes vault root")
+            search_roots.append(root)
     else:
         search_roots = [vault]
 
@@ -26,15 +39,18 @@ def get_todos(
             # skip the .zk directory
             if ".zk" in md_file.parts:
                 continue
-            rel = str(md_file.relative_to(vault))
-            for line_num, line in enumerate(md_file.read_text().splitlines(), start=1):
-                m = _TODO_PATTERN.match(line.strip())
-                if m:
-                    results.append({
-                        "path": rel,
-                        "line": line_num,
-                        "text": m.group(1),
-                    })
+            try:
+                rel = str(md_file.relative_to(vault))
+                for line_num, line in enumerate(md_file.read_text().splitlines(), start=1):
+                    m = _TODO_PATTERN.match(line.strip())
+                    if m:
+                        results.append({
+                            "path": rel,
+                            "line": line_num,
+                            "text": m.group(1),
+                        })
+            except OSError as e:
+                logger.warning("Skipping %s during todo scan: %s", md_file, e)
 
     return results
 
@@ -47,24 +63,26 @@ def complete_todo(
 ) -> None:
     """Mark a task complete. Uses fuzzy ±5 line fallback if line number is stale."""
     note_path = resolve_note_path(path, vault)
-    lines = note_path.read_text().splitlines(keepends=True)
 
-    # try exact line first (1-indexed)
-    exact_idx = line - 1
-    if 0 <= exact_idx < len(lines):
-        if _TODO_PATTERN.match(lines[exact_idx].strip()) and task_text in lines[exact_idx]:
-            lines[exact_idx] = lines[exact_idx].replace("- [ ]", "- [x]", 1)
-            note_path.write_text("".join(lines))
-            return
+    with get_path_lock(note_path):
+        lines = note_path.read_text().splitlines(keepends=True)
 
-    # fuzzy fallback: search ±5 lines around the given line
-    search_start = max(0, exact_idx - 5)
-    search_end = min(len(lines), exact_idx + 6)
-    for i in range(search_start, search_end):
-        if _TODO_PATTERN.match(lines[i].strip()) and task_text in lines[i]:
-            lines[i] = lines[i].replace("- [ ]", "- [x]", 1)
-            note_path.write_text("".join(lines))
-            return
+        # try exact line first (1-indexed)
+        exact_idx = line - 1
+        if 0 <= exact_idx < len(lines):
+            if _TODO_PATTERN.match(lines[exact_idx].strip()) and task_text in lines[exact_idx]:
+                lines[exact_idx] = lines[exact_idx].replace("- [ ]", "- [x]", 1)
+                atomic_write(note_path, "".join(lines))
+                return
+
+        # fuzzy fallback: search ±5 lines around the given line
+        search_start = max(0, exact_idx - 5)
+        search_end = min(len(lines), exact_idx + 6)
+        for i in range(search_start, search_end):
+            if _TODO_PATTERN.match(lines[i].strip()) and task_text in lines[i]:
+                lines[i] = lines[i].replace("- [ ]", "- [x]", 1)
+                atomic_write(note_path, "".join(lines))
+                return
 
     raise ValueError(f"Task not found: '{task_text}' near line {line} in {path}")
 
