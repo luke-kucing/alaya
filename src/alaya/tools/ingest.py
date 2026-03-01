@@ -234,6 +234,34 @@ def ingest(
     )
 
 
+def batch_ingest(
+    sources: list[str],
+    tags: list[str],
+    vault: Path,
+) -> str:
+    """Ingest multiple sources in one call. Per-source errors are reported but do not abort the batch.
+
+    Returns a summary string with per-source status and aggregate totals.
+    """
+    lines = []
+    succeeded = 0
+    failed = 0
+    total_chunks = 0
+
+    for source in sources:
+        try:
+            result = ingest(source, tags=tags, vault=vault)
+            lines.append(f"OK  [{result.chunks_indexed} chunks] {result.title} ({source})")
+            succeeded += 1
+            total_chunks += result.chunks_indexed
+        except Exception as e:
+            lines.append(f"ERR {source}: {e}")
+            failed += 1
+
+    summary = f"{len(sources)} sources: {succeeded} ok, {failed} failed, {total_chunks} chunks indexed."
+    return summary + "\n\n" + "\n".join(lines)
+
+
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path) -> None:
@@ -259,4 +287,9 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             f"**Raw content:**\n{result.raw_text}"
             f"{links_section}"
         )
+
+    @mcp.tool()
+    def batch_ingest_tool(sources: list[str], tags: list[str] | None = None) -> str:
+        """Ingest multiple URLs, PDFs, or markdown files in one call. Per-source errors don't abort the batch."""
+        return batch_ingest(sources, tags=tags or [], vault=vault)
 
