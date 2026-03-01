@@ -13,24 +13,30 @@ def _tsv(line: str, count: int) -> tuple[str, ...]:
     return tuple(parts[i] if i < len(parts) else "" for i in range(count))
 
 
-def _run_reindex(vault: Path):
-    from alaya.index.reindex import reindex_all
-    return reindex_all(vault)
+def reindex_vault(vault: Path, confirm: bool = False, force: bool = False) -> str:
+    """Reindex the vault. Uses incremental mode by default (skips unchanged files).
 
-
-def reindex_vault(vault: Path, confirm: bool = False) -> str:
-    """Rebuild the full LanceDB vector index for the vault.
-
-    Requires confirm=True to prevent accidental triggering.
+    confirm=True is required to prevent accidental triggering.
+    force=True runs a full rebuild regardless of state.
     """
     if not confirm:
-        return "Reindex requires confirm=True. This will rebuild the entire vector index."
+        return "Reindex requires confirm=True. This will update the vector index."
     try:
-        result = _run_reindex(vault)
-        return (
-            f"Reindex complete: {result.notes_indexed} notes, "
-            f"{result.chunks_created} chunks in {result.duration_seconds}s."
-        )
+        if force:
+            from alaya.index.reindex import reindex_all
+            result = reindex_all(vault)
+            return (
+                f"Full reindex complete: {result.notes_indexed} notes, "
+                f"{result.chunks_created} chunks in {result.duration_seconds}s."
+            )
+        else:
+            from alaya.index.reindex import reindex_incremental
+            result = reindex_incremental(vault)
+            return (
+                f"Incremental reindex complete: {result.notes_indexed} updated, "
+                f"{result.notes_skipped} skipped, {result.notes_deleted} deleted, "
+                f"{result.chunks_created} chunks in {result.duration_seconds}s."
+            )
     except Exception as e:
         return f"Reindex failed: {e}"
 
@@ -252,7 +258,10 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         return get_tags(vault)
 
     @mcp.tool()
-    def reindex_vault_tool(confirm: bool = False) -> str:
-        """Rebuild the full LanceDB vector index. Requires confirm=True."""
-        return reindex_vault(vault, confirm=confirm)
+    def reindex_vault_tool(confirm: bool = False, force: bool = False) -> str:
+        """Update the LanceDB vector index. Uses incremental mode by default (skips unchanged files).
+
+        confirm=True required. force=True for a full rebuild.
+        """
+        return reindex_vault(vault, confirm=confirm, force=force)
 
