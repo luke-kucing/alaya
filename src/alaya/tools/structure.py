@@ -1,7 +1,21 @@
 """Structure tools: move_note, rename_note, delete_note, find_references."""
+import logging
 import re
 import shutil
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Top-level vault directories to skip during full-vault scans.
+_SKIP_DIRS = {".zk", ".git", ".venv", "__pycache__"}
+
+
+def _iter_vault_md(vault: Path):
+    """Yield .md files in vault, skipping tooling directories and unreadable files."""
+    for md_file in vault.rglob("*.md"):
+        if any(part in _SKIP_DIRS for part in md_file.parts):
+            continue
+        yield md_file
 
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
@@ -37,15 +51,19 @@ def find_and_replace_wikilinks(old_title: str, new_title: str, vault: Path) -> l
     """Replace [[old_title]] with [[new_title]] across all markdown files.
 
     Returns list of relative paths of files that were updated.
+    Skips unreadable files with a warning rather than aborting.
     """
     pattern = re.compile(r"\[\[" + re.escape(old_title) + r"\]\]")
     updated = []
-    for md_file in vault.rglob("*.md"):
-        content = md_file.read_text()
-        new_content, count = pattern.subn(f"[[{new_title}]]", content)
-        if count:
-            md_file.write_text(new_content)
-            updated.append(str(md_file.relative_to(vault)))
+    for md_file in _iter_vault_md(vault):
+        try:
+            content = md_file.read_text()
+            new_content, count = pattern.subn(f"[[{new_title}]]", content)
+            if count:
+                md_file.write_text(new_content)
+                updated.append(str(md_file.relative_to(vault)))
+        except OSError as e:
+            logger.warning("Skipping %s during wikilink update: %s", md_file, e)
     return updated
 
 
@@ -59,8 +77,12 @@ def find_references(
     text_pattern = re.compile(re.escape(title)) if include_text_mentions else None
 
     results = []
-    for md_file in vault.rglob("*.md"):
-        content = md_file.read_text()
+    for md_file in _iter_vault_md(vault):
+        try:
+            content = md_file.read_text()
+        except OSError as e:
+            logger.warning("Skipping %s during reference scan: %s", md_file, e)
+            continue
         rel = str(md_file.relative_to(vault))
 
         if wikilink_pattern.search(content):

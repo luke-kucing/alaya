@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alaya.tools.structure import move_note, rename_note, delete_note, find_references
+from alaya.tools.structure import move_note, rename_note, delete_note, find_references, find_and_replace_wikilinks, _iter_vault_md
 
 
 class TestMoveNote:
@@ -160,3 +160,49 @@ class TestFindReferences:
         results = find_references("voice-capture", vault, include_text_mentions=True)
         types = {r["type"] for r in results}
         assert "text" in types
+
+    def test_unreadable_file_does_not_crash_scan(self, vault: Path) -> None:
+        bad = vault / "ideas/unreadable.md"
+        bad.write_text("[[voice-capture]]")
+        bad.chmod(0o000)
+        try:
+            results = find_references("voice-capture", vault)
+            # scan completes; unreadable file is silently skipped
+            assert isinstance(results, list)
+        finally:
+            bad.chmod(0o644)
+
+    def test_skip_dirs_excluded_from_scan(self, tmp_path: Path) -> None:
+        """Files inside .git / .zk / .venv are not yielded."""
+        root = tmp_path / "isolated_vault"
+        root.mkdir()
+        (root / ".git").mkdir()
+        (root / ".git" / "COMMIT_EDITMSG.md").write_text("should be skipped")
+        (root / ".zk").mkdir()
+        (root / ".zk" / "config.md").write_text("should be skipped")
+        real = root / "notes" / "real.md"
+        real.parent.mkdir()
+        real.write_text("real note")
+
+        found = list(_iter_vault_md(root))
+        assert found == [real]
+
+
+class TestFindAndReplaceWikilinks:
+    def test_replaces_wikilinks_across_vault(self, vault: Path) -> None:
+        note = vault / "ideas/linker.md"
+        note.write_text("See [[old-title]] for more.\n")
+        updated = find_and_replace_wikilinks("old-title", "new-title", vault)
+        assert any("linker" in p for p in updated)
+        assert "[[new-title]]" in note.read_text()
+
+    def test_unreadable_file_does_not_abort(self, vault: Path) -> None:
+        bad = vault / "ideas/unreadable.md"
+        bad.write_text("[[old-title]]")
+        bad.chmod(0o000)
+        try:
+            # should not raise despite unreadable file
+            updated = find_and_replace_wikilinks("old-title", "new-title", vault)
+            assert isinstance(updated, list)
+        finally:
+            bad.chmod(0o644)

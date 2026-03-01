@@ -65,9 +65,10 @@ def get_note_by_title(title: str, vault: Path) -> str:
 
     Raises FileNotFoundError if no match, ValueError if multiple matches.
     """
+    from alaya.tools.structure import _iter_vault_md
     title_lower = title.lower()
     matches = []
-    for md_file in vault.rglob("*.md"):
+    for md_file in _iter_vault_md(vault):
         try:
             content = md_file.read_text()
         except OSError:
