@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alaya.tools.write import create_note, append_to_note, update_tags, _load_template, _render_template, _build_note_content
+from alaya.tools.write import create_note, append_to_note, update_tags, _load_template, _render_template, _build_note_content, _check_duplicates
 
 
 class TestCreateNote:
@@ -154,6 +154,51 @@ class TestTemplates:
         content = (vault / path).read_text()
         assert "---" in content
         assert "plain body" in content
+
+
+class TestCheckDuplicates:
+    def test_returns_empty_when_index_unavailable(self, vault: Path) -> None:
+        # No index in fixture vault — should not raise, just return []
+        result = _check_duplicates("Any Title", "any body", vault)
+        assert result == []
+
+    def test_returns_empty_on_any_exception(self, vault: Path) -> None:
+        # Any exception inside should be swallowed
+        with patch("alaya.tools.write._check_duplicates", wraps=_check_duplicates):
+            with patch("alaya.index.store.hybrid_search", side_effect=RuntimeError("boom")):
+                result = _check_duplicates("Title", "body", vault)
+        assert result == []
+
+    def test_create_note_tool_warns_on_duplicate(self, vault: Path) -> None:
+        from fastmcp import FastMCP
+        from alaya.tools.write import _register
+        test_mcp = FastMCP("test")
+        _register(test_mcp, vault)
+
+        dupe = [{"title": "Near Dup", "path": "dup.md", "score": 0.92, "directory": "ideas", "text": "x"}]
+        with patch("alaya.tools.write._check_duplicates", return_value=dupe):
+            import asyncio
+            result = asyncio.run(test_mcp.call_tool("create_note_tool", {
+                "title": "Near Dup", "directory": "ideas", "tags": [], "confirm": False,
+            }))
+        assert "WARNING" in str(result)
+        assert "Near Dup" in str(result)
+
+    def test_create_note_tool_confirm_bypasses_warning(self, vault: Path) -> None:
+        from fastmcp import FastMCP
+        from alaya.tools.write import _register
+        test_mcp = FastMCP("test")
+        _register(test_mcp, vault)
+
+        dupe = [{"title": "Near Dup", "path": "dup.md", "score": 0.92, "directory": "ideas", "text": "x"}]
+        with patch("alaya.tools.write._check_duplicates", return_value=dupe):
+            import asyncio
+            result = asyncio.run(test_mcp.call_tool("create_note_tool", {
+                "title": "Unique Enough", "directory": "ideas", "tags": [], "confirm": True,
+            }))
+        # Should create the note, not warn
+        assert "WARNING" not in str(result)
+        assert ".md" in str(result)
 
 
 class TestAppendToNote:

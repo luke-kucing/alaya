@@ -10,6 +10,32 @@ from alaya.events import emit, NoteEvent, EventType
 from alaya.vault import resolve_note_path
 from alaya.tools._locks import get_path_lock, atomic_write
 
+_DEDUP_THRESHOLD = 0.85
+
+
+def _check_duplicates(title: str, body: str, vault: Path, threshold: float = _DEDUP_THRESHOLD) -> list[dict]:
+    """Return notes with semantic similarity above threshold.
+
+    Uses the same vector search as suggested-links. Returns [] if the index
+    is empty or unavailable (never blocks note creation on search failure).
+    """
+    try:
+        from alaya.index.embedder import get_model
+        from alaya.index.store import get_store, hybrid_search
+        import numpy as np
+
+        text = f"{title}. {body[:200]}"
+        model, cfg = get_model()
+        raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text}"])))
+        norm = np.linalg.norm(raw[0])
+        embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
+        store = get_store(vault)
+        results = hybrid_search(text, embedding, store, limit=5)
+        return [r for r in results if r["score"] >= threshold]
+    except Exception:
+        return []
+
+
 def _validate_directory(directory: str, vault: Path) -> Path:
     """Resolve directory inside vault and reject path traversal."""
     target = (vault / directory).resolve()
@@ -243,12 +269,24 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         tags: list[str],
         body: str = "",
         template: str = "",
+        confirm: bool = False,
     ) -> str:
         """Create a new note. Returns the relative path of the created file.
 
         template: name of a template in vault/templates/ (without .md). Falls back to
         directory name, then 'default', then the built-in inline format.
+        confirm: set True to create even when semantically similar notes exist.
         """
+        if not confirm:
+            dupes = _check_duplicates(title, body, vault)
+            if dupes:
+                dupe_list = ", ".join(
+                    f"[[{d['title']}]] ({d['score']:.0%})" for d in dupes
+                )
+                return (
+                    f"WARNING: Similar notes already exist: {dupe_list}. "
+                    "Create anyway with confirm=True."
+                )
         try:
             return create_note(title, directory, tags, body, vault, template=template or None)
         except FileExistsError as e:
