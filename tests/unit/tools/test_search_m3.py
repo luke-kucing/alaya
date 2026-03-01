@@ -48,14 +48,16 @@ class TestReindexVault:
         mock_result.notes_indexed = 12
         mock_result.chunks_created = 47
         mock_result.duration_seconds = 3.2
+        mock_result.notes_skipped = 5
+        mock_result.notes_deleted = 0
 
-        with patch("alaya.tools.read._run_reindex", return_value=mock_result):
+        with patch("alaya.index.reindex.reindex_incremental", return_value=mock_result):
             result = reindex_vault(vault, confirm=True)
 
         assert "12" in result
         assert "47" in result
 
     def test_reindex_error_returns_message(self, vault: Path) -> None:
-        with patch("alaya.tools.read._run_reindex", side_effect=Exception("disk full")):
+        with patch("alaya.index.reindex.reindex_incremental", side_effect=Exception("disk full")):
             result = reindex_vault(vault, confirm=True)
         assert "error" in result.lower() or "failed" in result.lower()
