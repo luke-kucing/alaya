@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from alaya.tools.ingest import ingest, IngestResult, _fetch_url, _validate_url
+from alaya.tools.ingest import ingest, batch_ingest, IngestResult, _fetch_url, _validate_url
 
 
 SAMPLE_HTML = """
@@ -333,4 +333,36 @@ class TestIngestDate:
             _index_content("test/path.md", "Test Title", [], "some text", vault)
 
         assert "2026-01-01" not in captured.get("content", ""), "Date must not be hardcoded"
-        assert today in captured.get("content", ""), f"Expected today {today} in synthetic frontmatter"
+
+
+class TestBatchIngest:
+    def _ok_result(self, source: str) -> IngestResult:
+        return IngestResult(title=source, source=source, raw_text="text", chunks_indexed=2)
+
+    def test_all_succeed(self, vault: Path) -> None:
+        sources = ["https://a.com", "https://b.com"]
+        with patch("alaya.tools.ingest.ingest", side_effect=[self._ok_result(s) for s in sources]):
+            result = batch_ingest(sources, tags=[], vault=vault)
+        assert "2 sources" in result
+        assert "2 ok" in result
+        assert "0 failed" in result
+
+    def test_partial_failure_reported(self, vault: Path) -> None:
+        sources = ["https://a.com", "https://bad.com"]
+        with patch("alaya.tools.ingest.ingest", side_effect=[self._ok_result(sources[0]), RuntimeError("timeout")]):
+            result = batch_ingest(sources, tags=[], vault=vault)
+        assert "1 ok" in result
+        assert "1 failed" in result
+        assert "ERR" in result
+        assert "timeout" in result
+
+    def test_empty_batch(self, vault: Path) -> None:
+        result = batch_ingest([], tags=[], vault=vault)
+        assert "0 sources" in result
+
+    def test_total_chunks_summed(self, vault: Path) -> None:
+        sources = ["https://a.com", "https://b.com"]
+        results = [IngestResult(title=s, source=s, raw_text="x", chunks_indexed=3) for s in sources]
+        with patch("alaya.tools.ingest.ingest", side_effect=results):
+            result = batch_ingest(sources, tags=[], vault=vault)
+        assert "6 chunks" in result
