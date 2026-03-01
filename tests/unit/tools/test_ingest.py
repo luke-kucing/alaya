@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from alaya.tools.ingest import ingest, IngestResult, _fetch_url
+from alaya.tools.ingest import ingest, IngestResult, _fetch_url, _validate_url
 
 
 SAMPLE_HTML = """
@@ -147,9 +147,11 @@ class TestFetchUrlRetry:
     """Tests for retry logic in _fetch_url."""
 
     def test_success_on_first_attempt_returns_result(self) -> None:
+        import httpx
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = "<html>content</html>"
+        mock_response.url = httpx.URL("https://example.com/page")
         with patch("httpx.get", return_value=mock_response):
             title, html = _fetch_url("https://example.com/page", _retries=3, _backoff=0)
         assert html == "<html>content</html>"
@@ -159,6 +161,7 @@ class TestFetchUrlRetry:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = "<html>content</html>"
+        mock_response.url = httpx.URL("https://example.com/page")
         with patch("httpx.get", side_effect=[
             httpx.TransportError("connection reset"),
             mock_response,
@@ -177,10 +180,12 @@ class TestFetchUrlRetry:
         import httpx
         fail_response = MagicMock()
         fail_response.status_code = 503
+        fail_response.url = httpx.URL("https://example.com/page")
 
         ok_response = MagicMock()
         ok_response.status_code = 200
         ok_response.text = "content"
+        ok_response.url = httpx.URL("https://example.com/page")
 
         with patch("httpx.get", side_effect=[fail_response, ok_response]), \
              patch("time.sleep"):
@@ -191,6 +196,7 @@ class TestFetchUrlRetry:
         import httpx
         error_response = MagicMock()
         error_response.status_code = 404
+        error_response.url = httpx.URL("https://example.com/missing")
         error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
             "404", request=MagicMock(), response=error_response
         )
@@ -199,6 +205,77 @@ class TestFetchUrlRetry:
                 _fetch_url("https://example.com/missing", _retries=3, _backoff=0)
         # should only have been called once — no retry on 4xx
         assert mock_get.call_count == 1
+
+
+class TestValidateUrl:
+    """Tests for SSRF protection in _validate_url."""
+
+    def test_https_public_allowed(self) -> None:
+        _validate_url("https://example.com/article")  # must not raise
+
+    def test_http_public_allowed(self) -> None:
+        _validate_url("http://example.com/article")  # must not raise
+
+    def test_file_scheme_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked URL scheme"):
+            _validate_url("file:///etc/passwd")
+
+    def test_ftp_scheme_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked URL scheme"):
+            _validate_url("ftp://example.com/file")
+
+    def test_data_scheme_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked URL scheme"):
+            _validate_url("data:text/plain,hello")
+
+    def test_loopback_ipv4_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked private/internal IP"):
+            _validate_url("http://127.0.0.1/admin")
+
+    def test_aws_metadata_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked private/internal IP"):
+            _validate_url("http://169.254.169.254/latest/meta-data/")
+
+    def test_private_10_block_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked private/internal IP"):
+            _validate_url("http://10.0.0.1/internal")
+
+    def test_private_192_168_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked private/internal IP"):
+            _validate_url("http://192.168.1.1/router")
+
+    def test_private_172_16_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked private/internal IP"):
+            _validate_url("http://172.16.0.1/service")
+
+    def test_ipv6_loopback_blocked(self) -> None:
+        with pytest.raises(ValueError, match="Blocked private/internal IP"):
+            _validate_url("http://[::1]:8080/admin")
+
+    def test_no_hostname_blocked(self) -> None:
+        with pytest.raises(ValueError, match="No hostname"):
+            _validate_url("http:///no-host")
+
+
+class TestFetchUrlSsrf:
+    """_fetch_url must reject SSRF attempts at the pre-request and post-redirect stage."""
+
+    def test_blocks_ssrf_url_before_request(self) -> None:
+        with pytest.raises(ValueError, match="Blocked"):
+            _fetch_url("http://169.254.169.254/latest/meta-data/")
+
+    def test_blocks_redirect_to_internal_ip(self) -> None:
+        """A redirect from a public URL to an internal IP must be caught post-redirect."""
+        import httpx
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "secret metadata"
+        # simulate redirect: response.url points to the internal address
+        mock_response.url = httpx.URL("http://169.254.169.254/latest/meta-data/")
+
+        with patch("httpx.get", return_value=mock_response):
+            with pytest.raises(ValueError, match="Blocked"):
+                _fetch_url("https://example.com/redirect-me")
 
 
 class TestIngestDate:

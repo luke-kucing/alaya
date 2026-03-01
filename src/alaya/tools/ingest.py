@@ -1,14 +1,43 @@
 """Ingest tool: PDF, URL, and markdown file ingestion into LanceDB."""
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
 
 _INGESTIBLE_SUFFIXES = {".pdf", ".md", ".txt"}
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+def _validate_url(url: str) -> None:
+    """Reject non-HTTP schemes and private/loopback/link-local IP destinations.
+
+    Called before making a request and again after redirect resolution so that
+    open redirects to internal addresses are also caught.
+
+    Raises ValueError for any disallowed URL.
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        raise ValueError(f"Blocked URL scheme '{scheme}': only http/https are allowed")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError(f"No hostname in URL: {url}")
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise ValueError(f"Blocked private/internal IP address: {hostname}")
+    except ValueError as exc:
+        # re-raise only our own errors; a non-IP hostname raises ValueError in
+        # ipaddress.ip_address() which we intentionally swallow here
+        if "Blocked" in str(exc):
+            raise
 # Minimum extracted characters before a PDF is considered scanned.
 # 250 chars is conservative (~2 short sentences) and avoids false-positives
 # on sparse-but-valid PDFs like slide decks or cover pages.
@@ -27,6 +56,7 @@ class IngestResult:
 def _fetch_url(url: str, _retries: int = 3, _backoff: float = 1.0) -> tuple[str, str]:
     """Fetch a URL and return (title, html_content).
 
+    Validates the URL before fetching and after any redirect to block SSRF.
     Retries up to _retries times with exponential backoff on transient errors
     (network failures and 5xx / 429 responses). 4xx client errors are not
     retried — they indicate a deterministic failure.
@@ -34,10 +64,14 @@ def _fetch_url(url: str, _retries: int = 3, _backoff: float = 1.0) -> tuple[str,
     import time
     import httpx
 
+    _validate_url(url)
+
     last_exc: Exception | None = None
     for attempt in range(_retries):
         try:
             response = httpx.get(url, timeout=30, follow_redirects=True)
+            # validate the final URL after any redirects
+            _validate_url(str(response.url))
             if response.status_code in {429, 500, 502, 503, 504} and attempt < _retries - 1:
                 time.sleep(_backoff * (2 ** attempt))
                 continue
