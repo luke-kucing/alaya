@@ -9,6 +9,19 @@ class ZKError(Exception):
     pass
 
 
+def _reject_flag(value: str, param_name: str) -> str:
+    """Raise ValueError if *value* looks like a CLI flag (starts with '-').
+
+    This prevents user-supplied MCP parameters from being interpreted as zk
+    flags even though we use list-based subprocess (which prevents shell
+    injection). Defense-in-depth: zk itself is unlikely to have dangerous
+    flags, but we should never let user input bleed into the option namespace.
+    """
+    if value.startswith("-"):
+        raise ValueError(f"Invalid {param_name} value {value!r}: must not start with '-'")
+    return value
+
+
 def run_zk(args: list[str], vault_root: Path, timeout: int = 30) -> str:
     """Run a zk CLI command and return stdout. Raises ZKError on failure."""
     cmd = ["zk"] + args

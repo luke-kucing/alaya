@@ -212,3 +212,37 @@ class TestGetTags:
         with patch("alaya.tools.read.run_zk", return_value=ZK_TAGS_OUTPUT.strip()):
             result = get_tags(vault)
         assert "|" in result
+
+
+class TestRejectFlag:
+    """_reject_flag must block values starting with '-' from entering zk args."""
+
+    def test_directory_starting_with_dash_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="must not start with '-'"):
+            list_notes(vault, directory="--help")
+
+    def test_tag_starting_with_dash_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="must not start with '-'"):
+            list_notes(vault, tag="--exec=rm -rf /")
+
+    def test_sort_starting_with_dash_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="must not start with '-'"):
+            list_notes(vault, sort="--version")
+
+    def test_since_starting_with_dash_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="must not start with '-'"):
+            list_notes(vault, since="--inject")
+
+    def test_until_starting_with_dash_raises(self, vault: Path) -> None:
+        with pytest.raises(ValueError, match="must not start with '-'"):
+            list_notes(vault, until="--inject")
+
+    def test_normal_directory_allowed(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=""):
+            result = list_notes(vault, directory="projects")
+        assert result == "No notes found."
+
+    def test_normal_tag_allowed(self, vault: Path) -> None:
+        with patch("alaya.tools.read.run_zk", return_value=""):
+            result = list_notes(vault, tag="kubernetes")
+        assert result == "No notes found."

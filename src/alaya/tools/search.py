@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.zk import run_zk, ZKError
+from alaya.zk import run_zk, ZKError, _reject_flag
 
 
 def _hybrid_search_available(vault: Path) -> bool:
@@ -68,12 +68,12 @@ def search_notes(
         "--limit", str(limit),
     ]
     if directory:
-        args.append(directory)
+        args += ["--", _reject_flag(directory, "directory")]
     if tags:
         for tag in tags:
-            args += ["--tag", tag]
+            args += ["--tag", _reject_flag(tag, "tag")]
     if since:
-        args += ["--modified-after", since]
+        args += ["--modified-after", _reject_flag(since, "since")]
 
     try:
         raw = run_zk(args, vault)
