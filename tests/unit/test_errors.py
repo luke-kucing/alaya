@@ -16,5 +16,5 @@ def test_error_codes_are_strings() -> None:
 
 def test_error_contains_code_and_message() -> None:
     result = error(ALREADY_EXISTS, "some message")
-    assert f"[{ALREADY_EXISTS}]" in result
+    assert f"[{ALREADY_EXISTS.value}]" in result
     assert "some message" in result

@@ -3,14 +3,22 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Callable
+
+
+class EventType(Enum):
+    CREATED = auto()
+    MODIFIED = auto()
+    DELETED = auto()
+    MOVED = auto()
 
 
 @dataclass
 class NoteEvent:
-    event_type: str  # "created", "modified", "deleted", "moved"
+    event_type: EventType
     path: str        # relative path of the affected note
-    old_path: str | None = None  # set only for "moved" events
+    old_path: str | None = None  # set only for MOVED events
 
 
 _listeners: list[Callable[[NoteEvent], None]] = []

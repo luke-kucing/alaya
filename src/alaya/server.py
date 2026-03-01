@@ -40,41 +40,48 @@ def _register_index_listener(vault: Path, watcher_handler=None) -> None:
 
     If watcher_handler is provided, marks indexed paths so the watcher skips them.
     """
-    from alaya.events import NoteEvent, on_note_change
+    from alaya.events import NoteEvent, EventType, on_note_change
     from alaya.index.store import get_store, upsert_note, delete_note_from_index, update_metadata
     from alaya.index.embedder import chunk_note, embed_chunks
     from alaya.index import health
+    from typing import Never
 
     store = get_store(vault)
 
+    def _unreachable(x: object) -> Never:
+        raise AssertionError(f"Unhandled EventType: {x!r}")
+
     def _handle(event: NoteEvent) -> None:
         try:
-            if event.event_type in ("created", "modified"):
-                content = (vault / event.path).read_text()
-                chunks = chunk_note(event.path, content)
-                embeddings = embed_chunks(chunks)
-                upsert_note(event.path, chunks, embeddings, store)
-                if watcher_handler:
-                    watcher_handler.mark_indexed(event.path)
-                health.record_success(event.path)
-                logger.debug("Index updated for %s (%s)", event.path, event.event_type)
-            elif event.event_type == "deleted":
-                delete_note_from_index(event.path, store)
-                if watcher_handler:
-                    watcher_handler.mark_indexed(event.path)
-                health.record_success(event.path)
-                logger.debug("Index entry removed for %s", event.path)
-            elif event.event_type == "moved":
-                update_metadata(
-                    event.old_path, event.path,
-                    new_title=None, new_tags=None, store=store,
-                )
-                if watcher_handler:
-                    watcher_handler.mark_indexed(event.path)
-                    if event.old_path:
-                        watcher_handler.mark_indexed(event.old_path)
-                health.record_success(event.path)
-                logger.debug("Index metadata updated: %s -> %s", event.old_path, event.path)
+            match event.event_type:
+                case EventType.CREATED | EventType.MODIFIED:
+                    content = (vault / event.path).read_text()
+                    chunks = chunk_note(event.path, content)
+                    embeddings = embed_chunks(chunks)
+                    upsert_note(event.path, chunks, embeddings, store)
+                    if watcher_handler:
+                        watcher_handler.mark_indexed(event.path)
+                    health.record_success(event.path)
+                    logger.debug("Index updated for %s (%s)", event.path, event.event_type)
+                case EventType.DELETED:
+                    delete_note_from_index(event.path, store)
+                    if watcher_handler:
+                        watcher_handler.mark_indexed(event.path)
+                    health.record_success(event.path)
+                    logger.debug("Index entry removed for %s", event.path)
+                case EventType.MOVED:
+                    update_metadata(
+                        event.old_path, event.path,
+                        new_title=None, new_tags=None, store=store,
+                    )
+                    if watcher_handler:
+                        watcher_handler.mark_indexed(event.path)
+                        if event.old_path:
+                            watcher_handler.mark_indexed(event.old_path)
+                    health.record_success(event.path)
+                    logger.debug("Index metadata updated: %s -> %s", event.old_path, event.path)
+                case _ as unhandled:
+                    _unreachable(unhandled)
         except Exception as e:
             health.record_failure(event.path, str(e))
             logger.warning("Index update failed for %s (%s): %s", event.path, event.event_type, e)
