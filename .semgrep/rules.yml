@@ -1,0 +1,72 @@
+rules:
+  # Detect unsanitized user input passed to subprocess
+  - id: alaya-subprocess-injection
+    patterns:
+      - pattern: subprocess.$FUNC([..., $USER_INPUT, ...], ...)
+      - pattern-not: subprocess.$FUNC(["...", ...], ...)
+    message: >
+      Subprocess called with a non-literal argument. Ensure $USER_INPUT is
+      validated/sanitized to prevent command injection.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-78
+
+  # Detect path traversal via user-supplied path fragments
+  - id: alaya-path-traversal
+    patterns:
+      - pattern: Path($ROOT) / $USER_INPUT
+      - pattern-not: Path($ROOT) / "..."
+    message: >
+      Path constructed from user-controlled input. Validate that the resolved
+      path stays within the intended vault root to prevent traversal attacks.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: CWE-22
+
+  # Detect f-string interpolation into SQL-like LanceDB filter strings
+  - id: alaya-lancedb-injection
+    pattern: |
+      $VAR = f"... {$USER_INPUT} ..."
+    pattern-not: |
+      $VAR = f"... {_sq($USER_INPUT)} ..."
+    message: >
+      String interpolated directly into a LanceDB filter without escaping via
+      _sq() or _sq_like(). Use the escaping helpers to prevent filter injection.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-89
+
+  # Flag eval/exec usage anywhere in the codebase
+  - id: alaya-no-eval
+    patterns:
+      - pattern: eval(...)
+      - pattern: exec(...)
+    message: >
+      Use of eval/exec detected. Avoid dynamic code execution; prefer explicit
+      dispatch tables or importlib-based plugin loading.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-95
+
+  # Catch broad except clauses that swallow all exceptions silently
+  - id: alaya-bare-except
+    pattern: |
+      try:
+        ...
+      except:
+        pass
+    message: >
+      Bare except silently swallows all exceptions including KeyboardInterrupt
+      and SystemExit. Catch specific exception types instead.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: reliability
