@@ -76,35 +76,41 @@ def extract_section(
     Returns the relative path of the new note.
     """
     path = resolve_note_path(source, vault)
-    if not path.exists():
-        raise FileNotFoundError(f"Note not found: {source}")
 
-    content = path.read_text()
-    lines = content.splitlines()
-    sections = _parse_sections(content)
+    # Hold the lock across read + create + rewrite to prevent races
+    with get_path_lock(path):
+        if not path.exists():
+            raise FileNotFoundError(f"Note not found: {source}")
 
-    match = next((s for s in sections if s[0].lower() == section.lower()), None)
-    if match is None:
-        raise ValueError(f"SECTION_NOT_FOUND: '{section}' in {source}")
+        content = path.read_text()
+        lines = content.splitlines()
+        sections = _parse_sections(content)
 
-    _, start, end = match
-    # body lines are the lines after the header line up to end
-    body_lines = lines[start + 1:end]
-    body = "\n".join(body_lines).strip()
+        match = next((s for s in sections if s[0].lower() == section.lower()), None)
+        if match is None:
+            raise ValueError(f"SECTION_NOT_FOUND: '{section}' in {source}")
 
-    # create new note with the extracted content
-    from alaya.tools.write import _slugify
-    new_path = create_note(
-        title=new_title,
-        directory=new_directory,
-        tags=[],
-        body=body,
-        vault=vault,
-    )
+        header_text, start, end = match
+        body_lines = lines[start + 1:end]
+        body = "\n".join(body_lines).strip()
 
-    # replace section body in original with a wikilink
-    slug = _slugify(new_title)
-    replace_section(source, section, f"[[{slug}]]", vault)
+        # create new note with the extracted content
+        new_path = create_note(
+            title=new_title,
+            directory=new_directory,
+            tags=[],
+            body=body,
+            vault=vault,
+        )
+
+        # replace section body in original with a wikilink (inline, lock already held)
+        from alaya.tools.write import _slugify
+        slug = _slugify(new_title)
+        header_line = lines[start]
+        before = lines[:start]
+        after = lines[end:]
+        new_lines = before + [header_line, f"[[{slug}]]"] + ([""] if after else []) + after
+        atomic_write(path, "\n".join(new_lines) + "\n")
 
     return new_path
 

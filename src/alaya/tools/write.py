@@ -20,15 +20,11 @@ def _check_duplicates(title: str, body: str, vault: Path, threshold: float = _DE
     is empty or unavailable (never blocks note creation on search failure).
     """
     try:
-        from alaya.index.embedder import get_model
+        from alaya.index.embedder import embed_query
         from alaya.index.store import get_store, hybrid_search
-        import numpy as np
 
         text = f"{title}. {body[:200]}"
-        model, cfg = get_model()
-        raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text}"])))
-        norm = np.linalg.norm(raw[0])
-        embedding = (raw[0] / (norm if norm else 1)).astype(np.float32)
+        embedding = embed_query(text)
         store = get_store(vault)
         results = hybrid_search(text, embedding, store, limit=5)
         return [r for r in results if r["score"] >= threshold]
@@ -67,10 +63,20 @@ def _load_template(vault: Path, name: str) -> str | None:
 
 
 def _render_template(template: str, **variables: str) -> str:
-    """Replace {key} placeholders in template with values."""
-    for key, value in variables.items():
-        template = template.replace(f"{{{key}}}", value)
-    return template
+    """Replace {key} placeholders in template with values.
+
+    Uses a single-pass regex to avoid double-substitution (e.g. body
+    containing '{title}' being re-expanded).
+    """
+    known_keys = set(variables.keys())
+
+    def _replace(match: re.Match) -> str:
+        key = match.group(1)
+        if key in known_keys:
+            return variables[key]
+        return match.group(0)  # leave unknown placeholders as-is
+
+    return re.sub(r"\{(\w+)\}", _replace, template)
 
 
 def _build_note_content(
@@ -242,7 +248,7 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
         updated_tags = (existing_tags | set(add)) - set(remove)
 
         # nothing changed — skip the write to avoid reordering tags
-        if updated_tags == existing_tags and not add:
+        if updated_tags == existing_tags:
             return
 
         new_tag_line = " ".join(f"#{t}" for t in sorted(updated_tags))

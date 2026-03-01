@@ -6,21 +6,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Top-level vault directories to skip during full-vault scans.
-_SKIP_DIRS = {".zk", ".git", ".venv", "__pycache__"}
-
-
-def _iter_vault_md(vault: Path):
-    """Yield .md files in vault, skipping tooling directories and unreadable files."""
-    for md_file in vault.rglob("*.md"):
-        if any(part in _SKIP_DIRS for part in md_file.parts):
-            continue
-        yield md_file
-
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.events import emit, NoteEvent, EventType
-from alaya.vault import resolve_note_path
+from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md
 from alaya.tools.write import _validate_directory, _slugify
 from alaya.tools._locks import get_path_lock, atomic_write
 
@@ -57,11 +46,12 @@ def find_and_replace_wikilinks(old_title: str, new_title: str, vault: Path) -> l
     updated = []
     for md_file in _iter_vault_md(vault):
         try:
-            content = md_file.read_text()
-            new_content, count = pattern.subn(f"[[{new_title}]]", content)
-            if count:
-                md_file.write_text(new_content)
-                updated.append(str(md_file.relative_to(vault)))
+            with get_path_lock(md_file):
+                content = md_file.read_text()
+                new_content, count = pattern.subn(f"[[{new_title}]]", content)
+                if count:
+                    atomic_write(md_file, new_content)
+                    updated.append(str(md_file.relative_to(vault)))
         except OSError as e:
             logger.warning("Skipping %s during wikilink update: %s", md_file, e)
     return updated
@@ -138,8 +128,8 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
         atomic_write(src, content)
         src.rename(dest)
 
-    # update all [[old_title]] → [[new_slug]] across vault
-    find_and_replace_wikilinks(old_title, new_slug, vault)
+    # update all [[old_title]] → [[new_title]] across vault
+    find_and_replace_wikilinks(old_title, new_title, vault)
 
     new_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.MOVED, new_relative, old_path=relative_path))

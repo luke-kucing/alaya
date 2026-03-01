@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.vault import parse_note
-from alaya.tools.structure import _iter_vault_md
+from alaya.vault import iter_vault_md as _iter_vault_md
 
 # Matches [[Title]] and [[Title|alias]]
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")

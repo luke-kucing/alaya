@@ -36,11 +36,19 @@ def emit(event: NoteEvent) -> None:
 
     Takes a snapshot of the listener list under the lock so that concurrent
     registration cannot cause RuntimeError or silent skips during iteration.
+    Each listener is called in its own try/except so one failure does not
+    prevent subsequent listeners from running.
     """
     with _listeners_lock:
         snapshot = list(_listeners)
     for listener in snapshot:
-        listener(event)
+        try:
+            listener(event)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Listener %r failed for event %s", listener, event, exc_info=True
+            )
 
 
 def clear_listeners() -> None:

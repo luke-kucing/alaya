@@ -66,6 +66,14 @@ def chunk_note(path: str, content: str) -> list[Chunk]:
     return strategy.chunk(path, content, ChunkConfig())
 
 
+def embed_query(text: str) -> np.ndarray:
+    """Embed a search query string. Returns a normalized float32 vector."""
+    model, cfg = get_model()
+    raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text}"])))
+    norm = np.linalg.norm(raw[0])
+    return (raw[0] / (norm if norm else 1)).astype(np.float32)
+
+
 def embed_chunks(chunks: list[Chunk]) -> list[np.ndarray]:
     """Embed a list of chunks. Returns one normalized float32 ndarray per chunk."""
     model, cfg = get_model()

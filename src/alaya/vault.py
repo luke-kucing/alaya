@@ -73,6 +73,18 @@ def _parse_inline_tags(body: str) -> list[str]:
     return []
 
 
+# Top-level vault directories to skip during full-vault scans.
+_SKIP_DIRS = {".zk", ".git", ".venv", "__pycache__"}
+
+
+def iter_vault_md(vault: Path):
+    """Yield .md files in vault, skipping tooling directories and unreadable files."""
+    for md_file in vault.rglob("*.md"):
+        if any(part in _SKIP_DIRS for part in md_file.parts):
+            continue
+        yield md_file
+
+
 def resolve_note_path(relative: str, vault: Path) -> Path:
     """Resolve a relative note path inside the vault.
 
