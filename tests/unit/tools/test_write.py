@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from alaya.tools.write import create_note, append_to_note, update_tags
+from alaya.tools.write import create_note, append_to_note, update_tags, _load_template, _render_template, _build_note_content
 
 
 class TestCreateNote:
@@ -104,6 +104,56 @@ class TestCreateNote:
     def test_valid_tags_accepted(self, vault: Path) -> None:
         path = create_note(title="tagged note", directory="ideas", tags=["python", "my-tag", "tag_2"], body="", vault=vault)
         assert path.endswith(".md")
+
+
+class TestTemplates:
+    def test_load_template_returns_none_if_missing(self, vault: Path) -> None:
+        assert _load_template(vault, "nonexistent") is None
+
+    def test_load_template_reads_file(self, vault: Path) -> None:
+        (vault / "templates").mkdir(exist_ok=True)
+        (vault / "templates" / "meeting.md").write_text("Meeting: {title}\n")
+        assert _load_template(vault, "meeting") == "Meeting: {title}\n"
+
+    def test_render_template_replaces_variables(self) -> None:
+        result = _render_template("Title: {title}, Date: {date}", title="My Note", date="2026-01-01")
+        assert result == "Title: My Note, Date: 2026-01-01"
+
+    def test_render_template_unknown_variable_left_intact(self) -> None:
+        result = _render_template("{title} and {unknown}", title="T")
+        assert "{unknown}" in result
+
+    def test_create_note_uses_named_template(self, vault: Path) -> None:
+        (vault / "templates").mkdir(exist_ok=True)
+        (vault / "templates" / "meeting.md").write_text(
+            "---\ntitle: {title}\ndate: {date}\n---\n{tags}\n\n## Agenda\n\n{body}\n"
+        )
+        path = create_note("Stand-Up", "ideas", ["scrum"], "Daily sync.", vault, template="meeting")
+        content = (vault / path).read_text()
+        assert "## Agenda" in content
+        assert "Stand-Up" in content
+        assert "#scrum" in content
+
+    def test_create_note_falls_back_to_directory_template(self, vault: Path) -> None:
+        (vault / "templates").mkdir(exist_ok=True)
+        (vault / "templates" / "ideas.md").write_text("---\ntitle: {title}\ndate: {date}\n---\nIdea: {body}\n")
+        path = create_note("Idea Note", "ideas", [], "cool idea", vault)
+        content = (vault / path).read_text()
+        assert "Idea: cool idea" in content
+
+    def test_create_note_falls_back_to_default_template(self, vault: Path) -> None:
+        (vault / "templates").mkdir(exist_ok=True)
+        (vault / "templates" / "default.md").write_text("---\ntitle: {title}\ndate: {date}\n---\nDefault: {body}\n")
+        path = create_note("Default Note", "projects", [], "body text", vault)
+        content = (vault / path).read_text()
+        assert "Default: body text" in content
+
+    def test_create_note_inline_fallback_when_no_templates(self, vault: Path) -> None:
+        # vault fixture has no templates/ directory
+        path = create_note("Plain Note", "ideas", ["x"], "plain body", vault)
+        content = (vault / path).read_text()
+        assert "---" in content
+        assert "plain body" in content
 
 
 class TestAppendToNote:

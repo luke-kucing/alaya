@@ -31,12 +31,68 @@ def _slugify(title: str) -> str:
 _VALID_TAG_RE = re.compile(r"^[\w-]+$")
 
 
+def _load_template(vault: Path, name: str) -> str | None:
+    """Load a template file from vault/templates/{name}.md, or None if not found."""
+    path = vault / "templates" / f"{name}.md"
+    try:
+        return path.read_text() if path.exists() else None
+    except OSError:
+        return None
+
+
+def _render_template(template: str, **variables: str) -> str:
+    """Replace {key} placeholders in template with values."""
+    for key, value in variables.items():
+        template = template.replace(f"{{{key}}}", value)
+    return template
+
+
+def _build_note_content(
+    title: str,
+    tags: list[str],
+    body: str,
+    vault: Path,
+    directory: str,
+    template: str | None,
+) -> str:
+    """Build note content from a template or the default inline format."""
+    tag_line = " ".join(f"#{t}" for t in tags) if tags else ""
+    today = date.today().isoformat()
+
+    # Template lookup: explicit name -> directory name -> default -> inline
+    tmpl = (
+        (_load_template(vault, template) if template else None)
+        or _load_template(vault, directory)
+        or _load_template(vault, "default")
+    )
+
+    if tmpl:
+        return _render_template(
+            tmpl,
+            title=title,
+            date=today,
+            tags=tag_line,
+            body=body,
+            directory=directory,
+        )
+
+    # Default inline format (unchanged behaviour when no templates exist)
+    parts = ["---", f"title: {title}", f"date: {today}", "---"]
+    if tag_line:
+        parts.append(tag_line)
+        parts.append("")
+    if body:
+        parts.append(body)
+    return "\n".join(parts) + "\n"
+
+
 def create_note(
     title: str,
     directory: str,
     tags: list[str],
     body: str,
     vault: Path,
+    template: str | None = None,
 ) -> str:
     """Create a new note and return its relative path."""
     slug = _slugify(title)
@@ -51,25 +107,12 @@ def create_note(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = target_dir / f"{slug}.md"
-
-    tag_line = " ".join(f"#{t}" for t in tags) if tags else ""
-
-    content_parts = [
-        "---",
-        f"title: {title}",
-        f"date: {date.today().isoformat()}",
-        "---",
-    ]
-    if tag_line:
-        content_parts.append(tag_line)
-        content_parts.append("")
-    if body:
-        content_parts.append(body)
+    content = _build_note_content(title, tags, body, vault, directory, template)
 
     with get_path_lock(file_path):
         if file_path.exists():
             raise FileExistsError(f"Note already exists: {file_path.relative_to(vault)}")
-        atomic_write(file_path, "\n".join(content_parts) + "\n")
+        atomic_write(file_path, content)
 
     relative = str(file_path.relative_to(vault))
     emit(NoteEvent(EventType.CREATED, relative))
@@ -194,10 +237,20 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
 
 def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
-    def create_note_tool(title: str, directory: str, tags: list[str], body: str = "") -> str:
-        """Create a new note. Returns the relative path of the created file."""
+    def create_note_tool(
+        title: str,
+        directory: str,
+        tags: list[str],
+        body: str = "",
+        template: str = "",
+    ) -> str:
+        """Create a new note. Returns the relative path of the created file.
+
+        template: name of a template in vault/templates/ (without .md). Falls back to
+        directory name, then 'default', then the built-in inline format.
+        """
         try:
-            return create_note(title, directory, tags, body, vault)
+            return create_note(title, directory, tags, body, vault, template=template or None)
         except FileExistsError as e:
             return error(ALREADY_EXISTS, str(e))
         except ValueError as e:
