@@ -121,6 +121,7 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
         fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
         old_title = fm_title_match.group(1).strip() if fm_title_match else src.stem
         new_slug = _slugify(new_title)
+        # nosemgrep: semgrep.alaya-path-traversal — src from resolve_note_path(), slug from _slugify()
         dest = src.parent / f"{new_slug}.md"
 
         # update frontmatter title then rename atomically

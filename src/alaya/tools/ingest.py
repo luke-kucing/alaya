@@ -194,6 +194,7 @@ def ingest(
     else:
         path = Path(source)
         if not path.is_absolute():
+            # nosemgrep: semgrep.alaya-path-traversal — validated by relative_to() on line 202
             path = vault / source
 
         # Reject paths that escape the vault root (traversal or absolute paths

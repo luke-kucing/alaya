@@ -25,6 +25,7 @@ def get_todos(
         search_roots = []
         vault_resolved = vault.resolve()
         for d in directories:
+            # nosemgrep: semgrep.alaya-path-traversal — validated by relative_to() on next line
             root = (vault / d).resolve()
             try:
                 root.relative_to(vault_resolved)

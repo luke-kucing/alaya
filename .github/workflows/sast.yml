@@ -24,8 +24,10 @@ jobs:
       - name: Run Semgrep (OSS rules)
         run: |
           semgrep scan \
+            --config p/default \
             --config p/python \
             --config p/owasp-top-ten \
+            --config p/security-audit \
             --config p/secrets \
             --config .semgrep/ \
             --sarif-output semgrep.sarif \

@@ -34,6 +34,7 @@ def _check_duplicates(title: str, body: str, vault: Path, threshold: float = _DE
 
 def _validate_directory(directory: str, vault: Path) -> Path:
     """Resolve directory inside vault and reject path traversal."""
+    # nosemgrep: semgrep.alaya-path-traversal — this function IS the traversal validator
     target = (vault / directory).resolve()
     try:
         target.relative_to(vault.resolve())
@@ -56,7 +57,8 @@ _VALID_TAG_RE = re.compile(r"^[\w-]+$")
 def _load_template(vault: Path, name: str) -> str | None:
     """Load a template file from vault/templates/{name}.md, or None if not found."""
     templates_dir = (vault / "templates").resolve()
-    path = (templates_dir / f"{name}.md").resolve()  # nosemgrep: alaya-path-traversal
+    # nosemgrep: semgrep.alaya-path-traversal — validated by is_relative_to() on next line
+    path = (templates_dir / f"{name}.md").resolve()
     if not path.is_relative_to(templates_dir):
         raise ValueError(f"Template name {name!r} escapes templates directory")
     try:
@@ -141,6 +143,7 @@ def create_note(
     target_dir = _validate_directory(directory, vault)
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # nosemgrep: semgrep.alaya-path-traversal — target_dir from _validate_directory(), slug from _slugify()
     file_path = target_dir / f"{slug}.md"
     content = _build_note_content(title, tags, body, vault, directory, template)
 
