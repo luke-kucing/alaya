@@ -72,8 +72,14 @@ class VaultStore:
                 pa.field("chunk_index", pa.int32()),
                 pa.field("text", pa.string()),
                 pa.field("vector", pa.list_(pa.float32(), _get_dim())),
+                pa.field("embedding_model", pa.string()),
             ])
-            self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
+            try:
+                self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
+            except (pa.ArrowInvalid, Exception):
+                # Existing table has old schema (no embedding_model column).
+                # Open it as-is — search still works, model tracking is degraded.
+                self._table = db.open_table(_TABLE_NAME)
         return self._table
 
     def count(self) -> int:
@@ -83,6 +89,20 @@ class VaultStore:
             return 0
 
 
+def get_index_model(store: VaultStore) -> str | None:
+    """Return the embedding model name stored in the index, or None if index is empty/old schema."""
+    try:
+        table = store._get_table()
+        if "embedding_model" not in {f.name for f in table.schema}:
+            return None  # old schema, no model tracking
+        rows = table.search().limit(1).to_list()
+        if rows:
+            return rows[0].get("embedding_model") or None
+    except _STORE_ERRORS:
+        pass
+    return None
+
+
 def upsert_note(
     path: str,
     chunks: list,
@@ -90,6 +110,9 @@ def upsert_note(
     store: VaultStore,
 ) -> None:
     """Replace all chunks for `path` with the new chunks + embeddings."""
+    from alaya.index.models import get_active_model
+    active_model = get_active_model().name
+
     table = store._get_table()
 
     try:
@@ -100,9 +123,12 @@ def upsert_note(
     if not chunks:
         return
 
+    # Check if the table has the embedding_model column (absent on old schemas)
+    has_model_col = "embedding_model" in {f.name for f in table.schema}
+
     rows = []
     for chunk, embedding in zip(chunks, embeddings):
-        rows.append({
+        row = {
             "path": chunk.path,
             "title": chunk.title,
             "directory": chunk.directory,
@@ -111,7 +137,10 @@ def upsert_note(
             "chunk_index": chunk.chunk_index,
             "text": chunk.text,
             "vector": embedding.tolist(),
-        })
+        }
+        if has_model_col:
+            row["embedding_model"] = active_model
+        rows.append(row)
 
     table.add(rows)
 
