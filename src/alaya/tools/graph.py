@@ -58,10 +58,10 @@ def vault_graph(vault: Path, directory: str = "", max_nodes: int = 200) -> str:
             inlink_counts[target_path] += 1
 
     # Orphans: notes with zero inlinks AND zero outlinks to known nodes
-    outlink_set = {src for src, _ in edges}
+    outlink_to_known = {src for src, target_title in edges if title_to_path.get(target_title)}
     orphans = [
         path for path in nodes
-        if inlink_counts[path] == 0 and path not in outlink_set
+        if inlink_counts[path] == 0 and path not in outlink_to_known
     ]
 
     # Hubs: top 10 most linked-to

@@ -12,19 +12,20 @@ import threading
 from pathlib import Path
 
 _registry_lock = threading.Lock()
-_path_locks: dict[Path, threading.Lock] = {}
+_path_locks: dict[Path, threading.RLock] = {}
 
 
-def get_path_lock(path: Path) -> threading.Lock:
-    """Return the lock for *path*, creating it if needed.
+def get_path_lock(path: Path) -> threading.RLock:
+    """Return the reentrant lock for *path*, creating it if needed.
 
     Uses path.resolve() so that relative and absolute references to the
-    same file share a single lock.
+    same file share a single lock. RLock allows the same thread to acquire
+    the lock multiple times (e.g. extract_section -> create_note).
     """
     resolved = path.resolve()
     with _registry_lock:
         if resolved not in _path_locks:
-            _path_locks[resolved] = threading.Lock()
+            _path_locks[resolved] = threading.RLock()
         return _path_locks[resolved]
 
 

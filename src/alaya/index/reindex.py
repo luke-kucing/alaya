@@ -33,6 +33,7 @@ def reindex_all(vault_root: Path, store=None) -> ReindexResult:
     """Rebuild the full LanceDB index for the vault.
 
     Enumerates all .md files, chunks each one, embeds in batches, writes to store.
+    Removes stale entries for files that no longer exist.
     """
     if store is None:
         store = get_store(vault_root)
@@ -40,9 +41,11 @@ def reindex_all(vault_root: Path, store=None) -> ReindexResult:
     start = time.monotonic()
     notes_indexed = 0
     chunks_created = 0
+    seen_paths: set[str] = set()
 
     for md_file in _iter_vault_md(vault_root):
         rel = str(md_file.relative_to(vault_root))
+        seen_paths.add(rel)
         content = md_file.read_text()
         chunks = chunk_note(rel, content)
         if not chunks:
@@ -52,11 +55,23 @@ def reindex_all(vault_root: Path, store=None) -> ReindexResult:
         notes_indexed += 1
         chunks_created += len(chunks)
 
+    # Remove stale entries for files no longer in the vault
+    notes_deleted = 0
+    try:
+        table = store._get_table()
+        all_paths = {r["path"] for r in table.search().select(["path"]).limit(100000).to_list()}
+        for stale_path in all_paths - seen_paths:
+            delete_note_from_index(stale_path, store)
+            notes_deleted += 1
+    except Exception as e:
+        logger.warning("Failed to clean up stale index entries: %s", e)
+
     duration = time.monotonic() - start
     return ReindexResult(
         notes_indexed=notes_indexed,
         chunks_created=chunks_created,
         duration_seconds=round(duration, 2),
+        notes_deleted=notes_deleted,
     )
 
 

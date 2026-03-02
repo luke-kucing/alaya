@@ -99,6 +99,8 @@ def move_note(relative_path: str, destination_dir: str, vault: Path) -> str:
     with get_path_lock(src):
         if not src.exists():
             raise FileNotFoundError(f"Note not found: {relative_path}")
+        if dest.exists():
+            raise FileExistsError(f"A note already exists at {dest.relative_to(vault)}")
         shutil.move(str(src), str(dest))
     new_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.MOVED, new_relative, old_path=relative_path))
@@ -111,12 +113,12 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
     Returns the new relative path.
     """
     src = resolve_note_path(relative_path, vault)
-    if not src.exists():
-        raise FileNotFoundError(f"Note not found: {relative_path}")
 
     # Use frontmatter title as the wikilink key; fall back to stem when absent.
     # zk wikilinks reference the note title, not the filename.
     with get_path_lock(src):
+        if not src.exists():
+            raise FileNotFoundError(f"Note not found: {relative_path}")
         content = src.read_text()
         fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
         old_title = fm_title_match.group(1).strip() if fm_title_match else src.stem
@@ -160,6 +162,12 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> s
             atomic_write(src, _insert_frontmatter_field(existing, "archived_reason", reason))
 
         dest = archives_dir / src.name
+        if dest.exists():
+            stem, suffix = src.stem, src.suffix
+            counter = 1
+            while dest.exists():
+                dest = archives_dir / f"{stem}-{counter}{suffix}"
+                counter += 1
         shutil.move(str(src), str(dest))
 
     archive_relative = str(dest.relative_to(vault))
@@ -177,6 +185,8 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             return move_note(path, destination, vault)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
+        except FileExistsError as e:
+            return error(ALREADY_EXISTS, str(e))
         except ValueError as e:
             return error(OUTSIDE_VAULT, str(e))
 
