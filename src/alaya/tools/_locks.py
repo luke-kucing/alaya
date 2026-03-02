@@ -7,6 +7,7 @@ writes on the same file.
 Only protects within a single process — sufficient for the MCP server model.
 """
 import os
+import stat
 import tempfile
 import threading
 from pathlib import Path
@@ -39,6 +40,8 @@ def atomic_write(path: Path, content: str) -> None:
     tmp = Path(tmp_name)
     try:
         os.close(fd)
+        if path.exists():
+            os.chmod(tmp_name, stat.S_IMODE(path.stat().st_mode))
         tmp.write_text(content)
         tmp.replace(path)
     except Exception:
