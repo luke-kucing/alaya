@@ -4,6 +4,71 @@
 
 A FastMCP server that makes Claude Code the primary interface for a `zk`-managed personal knowledge vault. Full read/write/search/synthesis access — the AI is the interface, the vault is the source of truth.
 
+## Quickstart
+
+```bash
+# 1. Install prerequisites
+brew install zk uv
+
+# 2. Clone and install
+git clone git@github.com:luke-kucing/alaya.git
+cd alaya
+uv sync
+
+# 3. Initialize your vault (skip if you already have one)
+mkdir -p ~/notes && cd ~/notes && zk init && cd -
+
+# 4. Configure
+cp .env.example .env
+# edit .env — set ZK_NOTEBOOK_DIR to your vault path (e.g. ~/notes)
+
+# 5. Add to Claude Code (~/.claude/settings.json)
+```
+
+```json
+{
+  "mcpServers": {
+    "alaya": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/alaya", "python", "-m", "alaya.server"],
+      "env": {
+        "ZK_NOTEBOOK_DIR": "/Users/you/notes"
+      }
+    }
+  }
+}
+```
+
+```bash
+# 6. Start Claude Code — alaya connects automatically
+claude
+```
+
+That's it. Ask Claude to "search my notes for X" or "create a note about Y" and it works.
+
+### Running the server standalone
+
+```bash
+# Via make
+make serve
+
+# Or directly with env var
+ZK_NOTEBOOK_DIR=~/notes uv run python -m alaya.server
+
+# Or with .env file loaded
+export $(cat .env | xargs) && uv run python -m alaya.server
+```
+
+The server communicates over stdio (MCP protocol) — it's designed to be launched by Claude Code, not run in a browser.
+
+### Running tests
+
+```bash
+make test                # unit tests (377 tests, no external deps)
+make test-integration    # integration tests (requires zk binary)
+make lint                # ruff check
+```
+
 ## Philosophy
 
 - **The AI is the interface.** Stay in one place — a Claude Code session — and converse. Claude reads, writes, searches, and reasons across the vault.
@@ -150,34 +215,22 @@ Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links 
 | HTTP client | httpx |
 | External bridge | glab CLI (GitLab) / gh CLI (GitHub) / Outline API |
 
-## Setup
+## Configuration
 
 ### Prerequisites
 
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) — `brew install uv`
 - [zk](https://github.com/zk-org/zk) — `brew install zk`
 - [glab](https://gitlab.com/gitlab-org/cli) — `brew install glab` (optional, for GitLab bridge)
 - [gh](https://cli.github.com/) — `brew install gh` (optional, for GitHub bridge)
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
 
-### Install
-
-```bash
-git clone git@github.com:luke-kucing/alaya.git
-cd alaya
-uv sync
-```
-
-### Configure
-
-```bash
-cp .env.example .env
-# edit .env — set ZK_NOTEBOOK_DIR to your vault path
-```
+### Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `ZK_NOTEBOOK_DIR` | Yes | Path to your zk vault (e.g. `~/notes`) |
+| `ALAYA_EMBEDDING_MODEL` | No | Embedding model variant (`nomic-v1.5` or `nomic-v1.5-q4`, default: `nomic-v1.5`) |
 | `GITLAB_PROJECT` | No | GitLab project path — enables GitLab provider |
 | `GITLAB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
 | `GITHUB_REPO` | No | GitHub repo (e.g. `owner/repo`) — enables GitHub provider |
@@ -187,39 +240,11 @@ cp .env.example .env
 
 Configure any combination of providers. `pull_external` and `push_external` auto-detect the provider from URLs or use the configured defaults.
 
-### Run
-
-```bash
-# start the MCP server
-make serve
-
-# or directly
-ZK_NOTEBOOK_DIR=~/notes uv run python -m alaya.server
-```
-
-### Claude Code integration
-
-Add to your Claude Code MCP settings (`~/.claude/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "alaya": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/alaya", "python", "-m", "alaya.server"],
-      "env": {
-        "ZK_NOTEBOOK_DIR": "/Users/you/notes"
-      }
-    }
-  }
-}
-```
-
 ## Development
 
 ```bash
 make install          # install dependencies
-make test             # run unit tests (148 tests)
+make test             # run unit tests (377 tests)
 make test-unit        # run unit tests verbose
 make test-integration # run integration tests (requires zk binary)
 make lint             # ruff check
@@ -277,4 +302,4 @@ main  ← stable, receives from dev when full milestone is done
 
 ## Status
 
-All 5 milestones implemented. 148 unit tests passing. See [open issues](https://github.com/luke-kucing/alaya/issues) for known bugs and planned improvements.
+All 5 milestones implemented. 377 unit tests passing. See [open issues](https://github.com/luke-kucing/alaya/issues) for known bugs and planned improvements.
