@@ -193,11 +193,15 @@ def update_metadata(
             row.pop("_distance", None)
             updated.append(row)
 
-        # Add new rows before deleting old ones — brief duplication is
-        # harmless, but losing rows on a failed add is not recoverable.
-        table.add(updated)
+        # When paths differ, add first to avoid data loss on failure.
+        # When paths are equal, we must delete first since old and new
+        # rows share the same path and can't be distinguished.
         if old_path != new_path:
+            table.add(updated)
             table.delete(f"path = '{_sq(old_path)}'")
+        else:
+            table.delete(f"path = '{_sq(old_path)}'")
+            table.add(updated)
     except _STORE_ERRORS as e:
         logger.warning("Failed to update metadata for %s: %s", old_path, e)
 
@@ -229,7 +233,7 @@ def hybrid_search(
         if tags:
             for tag in tags:
                 # tags column is comma-bounded (e.g. ",python,web,"); match whole tags
-                filters.append(f"tags LIKE '%,{_sq_like(tag)},%'")
+                filters.append(f"tags LIKE '%,{_sq_like(tag)},%' ESCAPE '\\'")
         if since:
             filters.append(f"modified_date >= '{_sq(since)}'")
         if filters:

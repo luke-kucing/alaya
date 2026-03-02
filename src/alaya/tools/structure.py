@@ -133,7 +133,7 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
             raise FileExistsError(f"A note already exists at {dest.relative_to(vault)}")
 
         # update frontmatter title then rename atomically
-        content = re.sub(r"^title:.*$", f"title: {new_title}", content, count=1, flags=re.MULTILINE)
+        content = re.sub(r"^title:.*$", lambda m: f"title: {new_title}", content, count=1, flags=re.MULTILINE)
         atomic_write(src, content)
         src.rename(dest)
 
