@@ -69,7 +69,7 @@ def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
     files from the index.
     """
     from alaya.index.models import get_active_model
-    active_model = get_active_model().name
+    active_model = get_active_model().key
 
     if store is None:
         store = get_store(vault_root)

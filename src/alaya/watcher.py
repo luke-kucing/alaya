@@ -68,8 +68,11 @@ class VaultEventHandler(FileSystemEventHandler):
             return False
 
     def _is_ignored(self, path: str) -> bool:
-        parts = Path(path).parts
-        return any(d in parts for d in _IGNORED_DIRS)
+        try:
+            rel = Path(path).relative_to(self.vault)
+        except ValueError:
+            return True
+        return any(d in rel.parts for d in _IGNORED_DIRS)
 
     def _relative(self, path: str) -> str:
         return str(Path(path).relative_to(self.vault))
@@ -95,6 +98,8 @@ class VaultEventHandler(FileSystemEventHandler):
                 return
             content = path.read_text()
             chunks = chunk_note(rel, content)
+            if not chunks:
+                return
             embeddings = embed_chunks(chunks)
             upsert_note(rel, chunks, embeddings, self.store)
         except Exception as e:

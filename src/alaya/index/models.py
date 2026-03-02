@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class EmbeddingModelConfig:
-    name: str
+    key: str  # unique registry key used for identity comparisons
+    name: str  # HuggingFace model name passed to fastembed
     file_name: str | None
     dimensions: int
     search_prefix: str
@@ -16,6 +17,7 @@ class EmbeddingModelConfig:
 
 MODELS: dict[str, EmbeddingModelConfig] = {
     "nomic-v1.5": EmbeddingModelConfig(
+        key="nomic-v1.5",
         name="nomic-ai/nomic-embed-text-v1.5",
         file_name=None,  # fastembed default (model.onnx)
         dimensions=768,
@@ -23,6 +25,7 @@ MODELS: dict[str, EmbeddingModelConfig] = {
         document_prefix="search_document: ",
     ),
     "nomic-v1.5-q4": EmbeddingModelConfig(
+        key="nomic-v1.5-q4",
         name="nomic-ai/nomic-embed-text-v1.5",
         file_name="onnx/model_q4.onnx",
         dimensions=768,

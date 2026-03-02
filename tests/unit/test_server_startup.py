@@ -26,7 +26,7 @@ def test_maybe_start_reembed_no_op_when_models_match(tmp_path: Path) -> None:
     store = MagicMock()
     with patch("alaya.index.store.get_index_model", return_value="model-a"), \
          patch("alaya.index.models.get_active_model") as mock_active:
-        mock_active.return_value.name = "model-a"
+        mock_active.return_value.key = "model-a"
         threads_before = threading.active_count()
         _maybe_start_reembed(tmp_path, store)
         assert threading.active_count() == threads_before
@@ -36,7 +36,7 @@ def test_maybe_start_reembed_no_op_when_index_empty(tmp_path: Path) -> None:
     store = MagicMock()
     with patch("alaya.index.store.get_index_model", return_value=None), \
          patch("alaya.index.models.get_active_model") as mock_active:
-        mock_active.return_value.name = "model-a"
+        mock_active.return_value.key = "model-a"
         threads_before = threading.active_count()
         _maybe_start_reembed(tmp_path, store)
         assert threading.active_count() == threads_before
@@ -52,7 +52,7 @@ def test_maybe_start_reembed_spawns_thread_on_mismatch(tmp_path: Path) -> None:
     with patch("alaya.index.store.get_index_model", return_value="old-model"), \
          patch("alaya.index.models.get_active_model") as mock_active, \
          patch("alaya.index.reindex.reembed_background", side_effect=fake_reembed):
-        mock_active.return_value.name = "new-model"
+        mock_active.return_value.key = "new-model"
         _maybe_start_reembed(tmp_path, store)
         import time; time.sleep(0.05)
 
