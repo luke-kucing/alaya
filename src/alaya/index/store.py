@@ -58,6 +58,7 @@ class VaultStore:
 
     def __post_init__(self) -> None:
         self._init_lock = threading.Lock()
+        self._needs_reindex: bool = False
 
     def _connect(self) -> Any:
         if self._db is None:
@@ -83,11 +84,26 @@ class VaultStore:
                     ])
                     try:
                         self._table = db.create_table(_TABLE_NAME, schema=schema, exist_ok=True)
-                    except (pa.ArrowInvalid, OSError):
-                        # Existing table has old schema (no embedding_model column).
-                        # Open it as-is — search still works, model tracking is degraded.
-                        self._table = db.open_table(_TABLE_NAME)
+                    except (pa.ArrowInvalid, OSError, ValueError):
+                        # Schema mismatch (e.g. old schema, dimension change, LanceDB version upgrade).
+                        # Drop and recreate so the table is always consistent with the current schema.
+                        # A background reindex will repopulate it; search degrades to zk fallback meanwhile.
+                        logger.warning(
+                            "Schema mismatch on table %r — dropping and recreating. "
+                            "Background reindex will repopulate the index.",
+                            _TABLE_NAME,
+                        )
+                        db.drop_table(_TABLE_NAME)
+                        self._table = db.create_table(_TABLE_NAME, schema=schema)
+                        self._needs_reindex = True
         return self._table
+
+    def take_needs_reindex(self) -> bool:
+        """Return and clear the needs_reindex flag. Thread-safe via _init_lock."""
+        with self._init_lock:
+            val = self._needs_reindex
+            self._needs_reindex = False
+        return val
 
     def count(self) -> int:
         try:

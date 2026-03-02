@@ -176,6 +176,16 @@ def main() -> None:
     from alaya.watcher import start_watcher
 
     store = get_store(vault_root)
+    # Force table init now so schema-mismatch reindex starts before serving requests
+    store._get_table()
+    if store.take_needs_reindex():
+        import threading
+        from alaya.index.reindex import reindex_all
+        logger.warning("Schema mismatch detected — starting background full reindex")
+        threading.Thread(
+            target=reindex_all, args=(vault_root, store), daemon=True, name="alaya-schema-reindex"
+        ).start()
+
     observer, handler = start_watcher(vault_root, store)
     _register_index_listener(vault_root, watcher_handler=handler)
     logger.info("File watcher started")

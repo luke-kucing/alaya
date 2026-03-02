@@ -219,6 +219,65 @@ class TestSqlLikeEscape:
         assert _sq_like("kubernetes") == "kubernetes"
 
 
+class TestSchemaMigration:
+    """VaultStore drops and recreates the table on schema mismatch, then sets needs_reindex."""
+
+    def test_schema_mismatch_raises_value_error_drops_and_recreates(self, tmp_path: Path) -> None:
+        store = VaultStore(tmp_path / "lance")
+        fake_table = MagicMock()
+        fake_db = MagicMock()
+
+        call_count = {"n": 0}
+
+        def create_table_side_effect(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise ValueError("Schema mismatch")
+            return fake_table
+
+        fake_db.create_table.side_effect = create_table_side_effect
+
+        with patch.object(store, "_connect", return_value=fake_db):
+            table = store._get_table()
+
+        fake_db.drop_table.assert_called_once_with("notes")
+        assert call_count["n"] == 2
+        assert table is fake_table
+        assert store.take_needs_reindex() is True
+
+    def test_take_needs_reindex_clears_flag(self, tmp_path: Path) -> None:
+        store = VaultStore(tmp_path / "lance")
+        fake_table = MagicMock()
+        fake_db = MagicMock()
+
+        call_count = {"n": 0}
+
+        def create_table_side_effect(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise ValueError("Schema mismatch")
+            return fake_table
+
+        fake_db.create_table.side_effect = create_table_side_effect
+
+        with patch.object(store, "_connect", return_value=fake_db):
+            store._get_table()
+
+        assert store.take_needs_reindex() is True
+        assert store.take_needs_reindex() is False
+
+    def test_no_mismatch_needs_reindex_false(self, tmp_path: Path) -> None:
+        store = VaultStore(tmp_path / "lance")
+        fake_table = MagicMock()
+        fake_db = MagicMock()
+        fake_db.create_table.return_value = fake_table
+
+        with patch.object(store, "_connect", return_value=fake_db):
+            store._get_table()
+
+        assert store.take_needs_reindex() is False
+
+
 class TestGetStoreConcurrency:
     """get_store() must return the same instance under concurrent first-time calls."""
 
