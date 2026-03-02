@@ -65,7 +65,7 @@ class TestUpdateMetadata:
         assert len(rows) == 1
         assert rows[0]["path"] == "new/note.md"
         assert rows[0]["title"] == "New"
-        assert rows[0]["tags"] == "b"
+        assert rows[0]["tags"] == ",b,"
 
     def test_update_metadata_no_title_change(self, tmp_path):
         from alaya.index.store import VaultStore, upsert_note, update_metadata

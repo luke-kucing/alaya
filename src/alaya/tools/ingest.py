@@ -293,12 +293,15 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         tags: list[str] | None = None,
     ) -> str:
         """Ingest a URL, PDF, or markdown file. Returns raw_text, title, chunks indexed, and suggested wikilinks."""
-        result = ingest(
-            source,
-            title=title or None,
-            tags=tags or [],
-            vault=vault,
-        )
+        try:
+            result = ingest(
+                source,
+                title=title or None,
+                tags=tags or [],
+                vault=vault,
+            )
+        except Exception as e:
+            return f"ERROR [INGEST_FAILED]: {e}"
         links = "\n".join(f"- [[{r['title']}]]" for r in result.suggested_links[:5])
         links_section = f"\n\n**Suggested links:**\n{links}" if links else ""
         return (
