@@ -18,29 +18,12 @@ uv sync
 # 3. Initialize your vault (skip if you already have one)
 mkdir -p ~/notes && cd ~/notes && zk init && cd -
 
-# 4. Configure
-cp .env.example .env
-# edit .env — set ZK_NOTEBOOK_DIR to your vault path (e.g. ~/notes)
+# 4. Register with Claude Code
+claude mcp add alaya \
+  -e ZK_NOTEBOOK_DIR=$HOME/notes \
+  -- uv run --directory $(pwd) python -m alaya.server
 
-# 5. Add to Claude Code (~/.claude/settings.json)
-```
-
-```json
-{
-  "mcpServers": {
-    "alaya": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/alaya", "python", "-m", "alaya.server"],
-      "env": {
-        "ZK_NOTEBOOK_DIR": "/Users/you/notes"
-      }
-    }
-  }
-}
-```
-
-```bash
-# 6. Start Claude Code — alaya connects automatically
+# 5. Start Claude Code — alaya connects automatically
 claude
 ```
 
@@ -237,6 +220,15 @@ Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links 
 | `GITHUB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
 | `OUTLINE_URL` | No | Outline instance URL — enables Outline provider |
 | `OUTLINE_API_KEY` | No | Outline API key |
+
+Pass additional env vars when registering with Claude Code using `-e`:
+
+```bash
+claude mcp add alaya \
+  -e ZK_NOTEBOOK_DIR=$HOME/notes \
+  -e GITHUB_REPO=owner/repo \
+  -- uv run --directory /path/to/alaya python -m alaya.server
+```
 
 Configure any combination of providers. `pull_external` and `push_external` auto-detect the provider from URLs or use the configured defaults.
 
