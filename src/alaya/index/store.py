@@ -139,7 +139,7 @@ def upsert_note(
             "path": chunk.path,
             "title": chunk.title,
             "directory": chunk.directory,
-            "tags": ",".join(chunk.tags),
+            "tags": "," + ",".join(chunk.tags) + "," if chunk.tags else "",
             "modified_date": chunk.modified_date,
             "chunk_index": chunk.chunk_index,
             "text": chunk.text,
@@ -188,7 +188,7 @@ def update_metadata(
             if new_title is not None:
                 row["title"] = new_title
             if new_tags is not None:
-                row["tags"] = ",".join(new_tags)
+                row["tags"] = "," + ",".join(new_tags) + "," if new_tags else ""
             # remove LanceDB internal fields before re-inserting
             row.pop("_distance", None)
             updated.append(row)
@@ -228,8 +228,8 @@ def hybrid_search(
             filters.append(f"directory = '{_sq(directory)}'")
         if tags:
             for tag in tags:
-                # tags column is comma-separated; match as substring
-                filters.append(f"tags LIKE '%{_sq_like(tag)}%'")
+                # tags column is comma-bounded (e.g. ",python,web,"); match whole tags
+                filters.append(f"tags LIKE '%,{_sq_like(tag)},%'")
         if since:
             filters.append(f"modified_date >= '{_sq(since)}'")
         if filters:

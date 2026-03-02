@@ -48,7 +48,8 @@ def find_and_replace_wikilinks(old_title: str, new_title: str, vault: Path) -> l
         try:
             with get_path_lock(md_file):
                 content = md_file.read_text()
-                new_content, count = pattern.subn(f"[[{new_title}]]", content)
+                replacement = f"[[{new_title}]]"
+                new_content, count = pattern.subn(lambda m: replacement, content)
                 if count:
                     atomic_write(md_file, new_content)
                     updated.append(str(md_file.relative_to(vault)))
@@ -122,6 +123,9 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
         content = src.read_text()
         fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
         old_title = fm_title_match.group(1).strip() if fm_title_match else src.stem
+        # Strip YAML quoting added by render_frontmatter for special characters
+        if len(old_title) >= 2 and old_title[0] == old_title[-1] and old_title[0] in ('"', "'"):
+            old_title = old_title[1:-1]
         new_slug = _slugify(new_title)
         # nosemgrep: semgrep.alaya-path-traversal — src from resolve_note_path(), slug from _slugify()
         dest = src.parent / f"{new_slug}.md"

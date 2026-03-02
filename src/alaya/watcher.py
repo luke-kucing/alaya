@@ -114,9 +114,10 @@ class VaultEventHandler(FileSystemEventHandler):
 
         path = Path(src)
         suffix = path.suffix.lower()
+        rel = path.relative_to(self.vault)
 
         # raw/ drop-in: trigger ingest for supported types
-        if "raw" in path.parts and suffix in _INGESTIBLE_SUFFIXES:
+        if "raw" in rel.parts and suffix in _INGESTIBLE_SUFFIXES:
             self._trigger_ingest(src)
             return
 
