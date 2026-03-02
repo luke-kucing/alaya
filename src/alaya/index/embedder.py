@@ -12,40 +12,40 @@ from alaya.index.models import get_active_model
 logger = logging.getLogger(__name__)
 
 _model = None
-_loaded_model_name: str | None = None  # track which model is loaded
-# Guards _model and _loaded_model_name against concurrent load by multiple threads
+_loaded_model_key: str | None = None  # track which model variant is loaded
+# Guards _model and _loaded_model_key against concurrent load by multiple threads
 # (e.g. watcher ingest thread + write-through event handler).
 _model_lock = threading.Lock()
 
 
 def get_model():
-    global _model, _loaded_model_name
+    global _model, _loaded_model_key
     cfg = get_active_model()
-    # Fast path: model already loaded and name matches — no lock needed for reads
+    # Fast path: model already loaded and key matches — no lock needed for reads
     # since CPython's GIL makes these reads atomic, and model identity is stable.
-    if _model is not None and _loaded_model_name == cfg.name:
+    if _model is not None and _loaded_model_key == cfg.key:
         return _model, cfg
     # Slow path: load under lock to prevent concurrent double-initialisation.
     with _model_lock:
         # Re-check after acquiring the lock (double-checked locking pattern).
-        if _model is None or _loaded_model_name != cfg.name:
-            logger.info("Loading embedding model: %s", cfg.name)
+        if _model is None or _loaded_model_key != cfg.key:
+            logger.info("Loading embedding model: %s (%s)", cfg.key, cfg.name)
             from fastembed import TextEmbedding
             kwargs = {}
             if cfg.file_name:
                 kwargs["model_file"] = cfg.file_name
             _model = TextEmbedding(cfg.name, **kwargs)
-            _loaded_model_name = cfg.name
+            _loaded_model_key = cfg.key
             logger.info("Embedding model loaded")
     return _model, cfg
 
 
 def reset_model() -> None:
     """Clear the cached model. Intended for use in tests only."""
-    global _model, _loaded_model_name
+    global _model, _loaded_model_key
     with _model_lock:
         _model = None
-        _loaded_model_name = None
+        _loaded_model_key = None
 
 
 @dataclass

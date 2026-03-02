@@ -94,7 +94,7 @@ _SKIP_DIRS = {".zk", ".git", ".venv", "__pycache__"}
 def iter_vault_md(vault: Path):
     """Yield .md files in vault, skipping tooling directories and unreadable files."""
     for md_file in vault.rglob("*.md"):
-        if any(part in _SKIP_DIRS for part in md_file.parts):
+        if any(part in _SKIP_DIRS for part in md_file.relative_to(vault).parts):
             continue
         yield md_file
 

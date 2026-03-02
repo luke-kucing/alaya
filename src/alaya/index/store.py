@@ -117,7 +117,7 @@ def upsert_note(
 ) -> None:
     """Replace all chunks for `path` with the new chunks + embeddings."""
     from alaya.index.models import get_active_model
-    active_model = get_active_model().name
+    active_model = get_active_model().key
 
     table = store._get_table()
 
@@ -176,8 +176,6 @@ def update_metadata(
         if not existing:
             return
 
-        table.delete(f"path = '{_sq(old_path)}'")
-
         updated = []
         for row in existing:
             row = dict(row)
@@ -191,7 +189,10 @@ def update_metadata(
             row.pop("_distance", None)
             updated.append(row)
 
+        # Add new rows before deleting old ones — brief duplication is
+        # harmless, but losing rows on a failed add is not recoverable.
         table.add(updated)
+        table.delete(f"path = '{_sq(old_path)}'")
     except _STORE_ERRORS as e:
         logger.warning("Failed to update metadata for %s: %s", old_path, e)
 

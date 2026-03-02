@@ -137,6 +137,7 @@ class TestModelChangeDetection:
              patch("alaya.index.models.get_active_model") as mock_model:
             mock_model.return_value = MagicMock(name="nomic-ai/model-a", dimensions=768)
             mock_model.return_value.name = "model-a"
+            mock_model.return_value.key = "model-a"
             reindex_incremental(vault)
 
         # Verify state file records model-a
@@ -153,6 +154,7 @@ class TestModelChangeDetection:
              patch("alaya.index.models.get_active_model") as mock_model:
             mock_model.return_value = MagicMock(name="nomic-ai/model-b", dimensions=768)
             mock_model.return_value.name = "model-b"
+            mock_model.return_value.key = "model-b"
             result = reindex_incremental(vault)
 
         assert result.notes_indexed == 1  # re-embedded despite no content change

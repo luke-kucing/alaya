@@ -7,7 +7,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from fastmcp import FastMCP
-from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT, ALREADY_EXISTS
 from alaya.events import emit, NoteEvent, EventType
 from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md
 from alaya.tools.write import _validate_directory, _slugify
@@ -92,14 +92,13 @@ def move_note(relative_path: str, destination_dir: str, vault: Path) -> str:
     update wikilinks.
     """
     src = resolve_note_path(relative_path, vault)
-    if not src.exists():
-        raise FileNotFoundError(f"Note not found: {relative_path}")
-
     dest_dir = _validate_directory(destination_dir, vault)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
 
     with get_path_lock(src):
+        if not src.exists():
+            raise FileNotFoundError(f"Note not found: {relative_path}")
         shutil.move(str(src), str(dest))
     new_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.MOVED, new_relative, old_path=relative_path))
@@ -124,6 +123,8 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
         new_slug = _slugify(new_title)
         # nosemgrep: semgrep.alaya-path-traversal — src from resolve_note_path(), slug from _slugify()
         dest = src.parent / f"{new_slug}.md"
+        if dest.exists() and dest != src:
+            raise FileExistsError(f"A note already exists at {dest.relative_to(vault)}")
 
         # update frontmatter title then rename atomically
         content = re.sub(r"^title:.*$", f"title: {new_title}", content, count=1, flags=re.MULTILINE)
@@ -144,22 +145,23 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> s
     Raises ValueError if the note is already in archives/.
     """
     src = resolve_note_path(relative_path, vault)
-    if not src.exists():
-        raise FileNotFoundError(f"Note not found: {relative_path}")
+    archives_dir = vault / _ARCHIVES_DIR
+    archives_dir.mkdir(exist_ok=True)
 
-    if src.resolve().is_relative_to((vault / _ARCHIVES_DIR).resolve()):
-        raise ValueError(f"Note is already archived: {relative_path}")
+    with get_path_lock(src):
+        if not src.exists():
+            raise FileNotFoundError(f"Note not found: {relative_path}")
 
-    if reason:
-        with get_path_lock(src):
+        if src.resolve().is_relative_to((vault / _ARCHIVES_DIR).resolve()):
+            raise ValueError(f"Note is already archived: {relative_path}")
+
+        if reason:
             existing = src.read_text()
             atomic_write(src, _insert_frontmatter_field(existing, "archived_reason", reason))
 
-    archives_dir = vault / _ARCHIVES_DIR
-    archives_dir.mkdir(exist_ok=True)
-    dest = archives_dir / src.name
+        dest = archives_dir / src.name
+        shutil.move(str(src), str(dest))
 
-    shutil.move(str(src), str(dest))
     archive_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.DELETED, relative_path))
     return archive_relative
@@ -185,6 +187,8 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             return rename_note(path, new_title, vault)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
+        except FileExistsError as e:
+            return error(ALREADY_EXISTS, str(e))
         except ValueError as e:
             return error(OUTSIDE_VAULT, str(e))
 

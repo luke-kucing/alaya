@@ -141,7 +141,7 @@ def _maybe_start_reembed(vault_root, store) -> None:
     from alaya.index.reindex import reembed_background
 
     stored = get_index_model(store)
-    active = get_active_model().name
+    active = get_active_model().key
     if stored is None or stored == active:
         return
 

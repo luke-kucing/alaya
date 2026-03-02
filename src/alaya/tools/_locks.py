@@ -6,6 +6,8 @@ writes on the same file.
 
 Only protects within a single process — sufficient for the MCP server model.
 """
+import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -32,8 +34,10 @@ def atomic_write(path: Path, content: str) -> None:
     On POSIX, os.replace() is guaranteed atomic when src and dst are on the
     same filesystem (which is always true for a sibling temp file).
     """
-    tmp = path.with_suffix(".tmp")
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    tmp = Path(tmp_name)
     try:
+        os.close(fd)
         tmp.write_text(content)
         tmp.replace(path)
     except Exception:
