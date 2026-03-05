@@ -191,10 +191,10 @@ class DailyNoteChunker:
         return chunks or [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
 
 
-def select_strategy(path: str, content: str) -> ChunkingStrategy:
+def select_strategy(path: str, content: str, daily_dir: str = "daily") -> ChunkingStrategy:
     """Choose the best chunking strategy based on path and content."""
     directory = path.split("/")[0] if "/" in path else ""
-    if directory == "daily":
+    if directory == daily_dir:
         return DailyNoteChunker()
     note = parse_note(content)
     if "## " in note.body:

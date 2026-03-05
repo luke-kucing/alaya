@@ -15,7 +15,7 @@ from alaya.index.embedder import chunk_note, embed_chunks
 from alaya.index.store import upsert_note, delete_note_from_index, VaultStore
 from alaya.tools.ingest import ingest
 
-_IGNORED_DIRS = {".zk", ".git", ".venv"}
+_IGNORED_DIRS = {".zk", ".obsidian", ".git", ".venv", ".trash"}
 _INGESTIBLE_SUFFIXES = {".pdf", ".md", ".txt"}
 _DEBOUNCE_SECONDS = 2.0
 # How long (seconds) a path is considered "recently indexed" by the event system.

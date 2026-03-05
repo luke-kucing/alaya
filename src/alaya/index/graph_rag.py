@@ -10,21 +10,25 @@ import re
 from pathlib import Path
 
 from alaya.vault import parse_note, iter_vault_md
+from alaya.backend.protocol import LinkResolution
 
 logger = logging.getLogger(__name__)
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 
 
-def _build_link_index(vault: Path) -> tuple[dict[str, set[str]], dict[str, str]]:
-    """Build outgoing links and title->path lookup for the vault.
+def _build_link_index(
+    vault: Path,
+    link_resolution: LinkResolution = LinkResolution.TITLE,
+) -> tuple[dict[str, set[str]], dict[str, str]]:
+    """Build outgoing links and key->path lookup for the vault.
 
-    Returns (outlinks, title_to_path) where:
-    - outlinks[path] = set of linked titles
-    - title_to_path[title] = path
+    Returns (outlinks, key_to_path) where:
+    - outlinks[path] = set of linked keys (titles or filename stems)
+    - key_to_path[key] = path
     """
     outlinks: dict[str, set[str]] = {}
-    title_to_path: dict[str, str] = {}
+    key_to_path: dict[str, str] = {}
 
     for md_file in iter_vault_md(vault):
         rel = str(md_file.relative_to(vault))
@@ -34,23 +38,26 @@ def _build_link_index(vault: Path) -> tuple[dict[str, set[str]], dict[str, str]]
             continue
 
         note = parse_note(content)
-        title = note.title or md_file.stem
-        title_to_path[title] = rel
+        if link_resolution == LinkResolution.FILENAME:
+            key = md_file.stem
+        else:
+            key = note.title or md_file.stem
+        key_to_path[key] = rel
 
         links = set()
         for match in _WIKILINK_RE.finditer(content):
             links.add(match.group(1).strip())
         outlinks[rel] = links
 
-    return outlinks, title_to_path
+    return outlinks, key_to_path
 
 
-def _invert_links(outlinks: dict[str, set[str]], title_to_path: dict[str, str]) -> dict[str, set[str]]:
+def _invert_links(outlinks: dict[str, set[str]], key_to_path: dict[str, str]) -> dict[str, set[str]]:
     """Build inlinks: for each path, which paths link TO it."""
     inlinks: dict[str, set[str]] = {}
     for src_path, targets in outlinks.items():
-        for target_title in targets:
-            target_path = title_to_path.get(target_title)
+        for target_key in targets:
+            target_path = key_to_path.get(target_key)
             if target_path:
                 inlinks.setdefault(target_path, set()).add(src_path)
     return inlinks
@@ -60,6 +67,7 @@ def expand_with_graph(
     results: list[dict],
     vault: Path,
     max_expansion: int = 5,
+    link_resolution: LinkResolution = LinkResolution.TITLE,
 ) -> list[dict]:
     """Augment search results by traversing 1-hop wikilinks.
 
@@ -71,6 +79,7 @@ def expand_with_graph(
         results: initial search results with {path, title, directory, score, text}
         vault: vault root path
         max_expansion: max number of graph-discovered notes to add
+        link_resolution: how wikilinks map to note files
 
     Returns:
         Combined results (original + graph-expanded), sorted by score.
@@ -78,8 +87,8 @@ def expand_with_graph(
     if not results:
         return results
 
-    outlinks, title_to_path = _build_link_index(vault)
-    inlinks = _invert_links(outlinks, title_to_path)
+    outlinks, key_to_path = _build_link_index(vault, link_resolution)
+    inlinks = _invert_links(outlinks, key_to_path)
 
     result_paths = {r["path"] for r in results}
     candidates: dict[str, float] = {}  # path -> score
@@ -92,8 +101,8 @@ def expand_with_graph(
         graph_score = base_score * 0.5
 
         # Outgoing links from this note
-        for target_title in outlinks.get(path, set()):
-            target_path = title_to_path.get(target_title)
+        for target_key in outlinks.get(path, set()):
+            target_path = key_to_path.get(target_key)
             if target_path and target_path not in result_paths:
                 candidates[target_path] = max(candidates.get(target_path, 0), graph_score)
 
@@ -109,10 +118,10 @@ def expand_with_graph(
     sorted_candidates = sorted(candidates.items(), key=lambda x: x[1], reverse=True)[:max_expansion]
 
     # Build result entries for graph-discovered notes
-    path_to_title = {v: k for k, v in title_to_path.items()}
+    path_to_key = {v: k for k, v in key_to_path.items()}
     expanded = []
     for path, score in sorted_candidates:
-        title = path_to_title.get(path, Path(path).stem)
+        title = path_to_key.get(path, Path(path).stem)
         directory = path.split("/")[0] if "/" in path else ""
         expanded.append({
             "path": path,

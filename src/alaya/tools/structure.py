@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT, ALREADY_EXISTS
 from alaya.events import emit, NoteEvent, EventType
-from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md
+from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md, parse_note
 from alaya.tools.write import _validate_directory, _slugify
 from alaya.tools._locks import get_path_lock, atomic_write
 
-_ARCHIVES_DIR = "archives"
+_DEFAULT_ARCHIVES_DIR = "archives"
 
 
 def _insert_frontmatter_field(content: str, key: str, value: str) -> str:
@@ -36,19 +36,19 @@ def _insert_frontmatter_field(content: str, key: str, value: str) -> str:
     return content  # no frontmatter found
 
 
-def find_and_replace_wikilinks(old_title: str, new_title: str, vault: Path) -> list[str]:
-    """Replace [[old_title]] with [[new_title]] across all markdown files.
+def find_and_replace_wikilinks(old_key: str, new_key: str, vault: Path) -> list[str]:
+    """Replace [[old_key]] with [[new_key]] across all markdown files.
 
     Returns list of relative paths of files that were updated.
     Skips unreadable files with a warning rather than aborting.
     """
-    pattern = re.compile(r"\[\[" + re.escape(old_title) + r"\]\]")
+    pattern = re.compile(r"\[\[" + re.escape(old_key) + r"\]\]")
     updated = []
     for md_file in _iter_vault_md(vault):
         try:
             with get_path_lock(md_file):
                 content = md_file.read_text()
-                replacement = f"[[{new_title}]]"
+                replacement = f"[[{new_key}]]"
                 new_content, count = pattern.subn(lambda m: replacement, content)
                 if count:
                     atomic_write(md_file, new_content)
@@ -85,13 +85,7 @@ def find_references(
 
 
 def move_note(relative_path: str, destination_dir: str, vault: Path) -> str:
-    """Move a note to destination_dir. Returns the new relative path.
-
-    zk uses title-based wikilinks ([[title]]). A directory move changes the
-    file path but not the title, so all existing wikilinks remain valid and
-    no vault-wide replacement is needed. Use rename_note when you need to
-    update wikilinks.
-    """
+    """Move a note to destination_dir. Returns the new relative path."""
     src = resolve_note_path(relative_path, vault)
     dest_dir = _validate_directory(destination_dir, vault)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -108,26 +102,31 @@ def move_note(relative_path: str, destination_dir: str, vault: Path) -> str:
     return new_relative
 
 
-def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
+def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -> str:
     """Rename a note: update title in frontmatter, rename file, update wikilinks vault-wide.
 
-    Returns the new relative path.
+    When backend is provided, uses its link resolution strategy to determine
+    the wikilink key. Otherwise defaults to frontmatter title (zk behavior).
     """
     src = resolve_note_path(relative_path, vault)
 
-    # Use frontmatter title as the wikilink key; fall back to stem when absent.
-    # zk wikilinks reference the note title, not the filename.
     with get_path_lock(src):
         if not src.exists():
             raise FileNotFoundError(f"Note not found: {relative_path}")
         content = src.read_text()
-        fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-        old_title = fm_title_match.group(1).strip() if fm_title_match else src.stem
-        # Strip YAML quoting added by render_frontmatter for special characters
-        if len(old_title) >= 2 and old_title[0] == old_title[-1] and old_title[0] in ('"', "'"):
-            old_title = old_title[1:-1]
+
+        if backend:
+            old_key = backend.note_link_key(src, content)
+        else:
+            # Legacy zk behavior: wikilink key is the frontmatter title
+            fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
+            old_key = fm_title_match.group(1).strip() if fm_title_match else src.stem
+            # Strip YAML quoting
+            if len(old_key) >= 2 and old_key[0] == old_key[-1] and old_key[0] in ('"', "'"):
+                old_key = old_key[1:-1]
+
         new_slug = _slugify(new_title)
-        # nosemgrep: semgrep.alaya-path-traversal — src from resolve_note_path(), slug from _slugify()
+        # nosemgrep: semgrep.alaya-path-traversal -- src from resolve_note_path(), slug from _slugify()
         dest = src.parent / f"{new_slug}.md"
         if dest.exists() and dest != src:
             raise FileExistsError(f"A note already exists at {dest.relative_to(vault)}")
@@ -137,51 +136,63 @@ def rename_note(relative_path: str, new_title: str, vault: Path) -> str:
         atomic_write(src, content)
         src.rename(dest)
 
-    # update all [[old_title]] → [[new_title]] across vault
-    find_and_replace_wikilinks(old_title, new_title, vault)
+    # Determine new wikilink key based on backend strategy
+    if backend:
+        new_content = dest.read_text()
+        new_key = backend.note_link_key(dest, new_content)
+    else:
+        new_key = new_title
+
+    # update all [[old_key]] -> [[new_key]] across vault
+    find_and_replace_wikilinks(old_key, new_key, vault)
 
     new_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.MOVED, new_relative, old_path=relative_path))
     return new_relative
 
 
-def delete_note(relative_path: str, vault: Path, reason: str | None = None) -> str:
+def delete_note(relative_path: str, vault: Path, reason: str | None = None, archives_dir: str = _DEFAULT_ARCHIVES_DIR) -> str:
     """Soft-delete: move note to archives/. Returns the archive path.
 
     Raises ValueError if the note is already in archives/.
     """
     src = resolve_note_path(relative_path, vault)
-    archives_dir = vault / _ARCHIVES_DIR
-    archives_dir.mkdir(exist_ok=True)
+    # nosemgrep: semgrep.alaya-path-traversal -- archives_dir from backend config, validated below
+    archive_path = (vault / archives_dir).resolve()
+    if not archive_path.is_relative_to(vault.resolve()):
+        raise ValueError(f"Archives directory '{archives_dir}' escapes vault root")
+    archive_path.mkdir(exist_ok=True)
 
     with get_path_lock(src):
         if not src.exists():
             raise FileNotFoundError(f"Note not found: {relative_path}")
 
-        if src.resolve().is_relative_to((vault / _ARCHIVES_DIR).resolve()):
+        if src.resolve().is_relative_to(archive_path):
             raise ValueError(f"Note is already archived: {relative_path}")
 
         if reason:
             existing = src.read_text()
             atomic_write(src, _insert_frontmatter_field(existing, "archived_reason", reason))
 
-        dest = archives_dir / src.name
+        dest = archive_path / src.name
         if dest.exists():
             stem, suffix = src.stem, src.suffix
             counter = 1
             while dest.exists():
-                dest = archives_dir / f"{stem}-{counter}{suffix}"
+                dest = archive_path / f"{stem}-{counter}{suffix}"  # nosemgrep: semgrep.alaya-path-traversal -- archive_path validated on line 161
                 counter += 1
         shutil.move(str(src), str(dest))
 
-    archive_relative = str(dest.relative_to(vault))
+    archive_relative = str(dest.relative_to(vault.resolve()))
     emit(NoteEvent(EventType.DELETED, relative_path))
     return archive_relative
 
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
+    _archives = backend.config.archives_dir if backend else _DEFAULT_ARCHIVES_DIR
+
     @mcp.tool()
     def move_note_tool(path: str, destination: str) -> str:
         """Move a note to a different directory. Returns the new path."""
@@ -198,7 +209,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
     def rename_note_tool(path: str, new_title: str) -> str:
         """Rename a note and update all wikilinks referencing it. Returns the new path."""
         try:
-            return rename_note(path, new_title, vault)
+            return rename_note(path, new_title, vault, backend=backend)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except FileExistsError as e:
@@ -210,7 +221,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
     def delete_note_tool(path: str, reason: str = "") -> str:
         """Soft-delete a note by moving it to archives/."""
         try:
-            return delete_note(path, vault, reason=reason or None)
+            return delete_note(path, vault, reason=reason or None, archives_dir=_archives)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:
@@ -224,4 +235,3 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             return f"No references to '{title}' found."
         lines = [f"- `{r['path']}` ({r['type']})" for r in results]
         return "\n".join(lines)
-

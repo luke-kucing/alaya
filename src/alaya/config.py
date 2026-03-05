@@ -1,24 +1,4 @@
-import os
-from pathlib import Path
+"""Configuration — re-exports from backend.config for backward compatibility."""
+from alaya.backend.config import ConfigError, get_vault_root
 
-
-class ConfigError(Exception):
-    pass
-
-
-def get_vault_root() -> Path:
-    raw = os.environ.get("ZK_NOTEBOOK_DIR")
-    if not raw:
-        raise ConfigError("ZK_NOTEBOOK_DIR environment variable is not set")
-
-    path = Path(raw).expanduser().resolve()
-
-    if not path.exists():
-        raise ConfigError(f"Vault root does not exist: {path}")
-
-    if not (path / ".zk").exists():
-        raise ConfigError(f"No .zk directory found at vault root: {path}. Run 'zk init' first.")
-
-    return path
-
-
+__all__ = ["ConfigError", "get_vault_root"]

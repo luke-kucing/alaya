@@ -28,11 +28,17 @@ dependencies = [
     { name = "httpx" },
     { name = "lancedb" },
     { name = "pymupdf4llm" },
+    { name = "pyyaml" },
     { name = "trafilatura" },
     { name = "watchdog" },
 ]
 
 [package.optional-dependencies]
+late-chunking = [
+    { name = "torch" },
+    { name = "transformers", version = "4.57.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "transformers", version = "5.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+]
 rerank = [
     { name = "sentence-transformers" },
 ]
@@ -51,8 +57,11 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "lancedb", specifier = ">=0.29" },
     { name = "pymupdf4llm", specifier = ">=0.0.17" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0" },
+    { name = "torch", marker = "extra == 'late-chunking'", specifier = ">=2.0" },
     { name = "trafilatura", specifier = ">=2.0" },
+    { name = "transformers", marker = "extra == 'late-chunking'", specifier = ">=4.40" },
     { name = "watchdog", specifier = ">=6.0" },
 ]
 

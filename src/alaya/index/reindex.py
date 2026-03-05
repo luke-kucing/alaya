@@ -75,13 +75,12 @@ def reindex_all(vault_root: Path, store=None) -> ReindexResult:
     )
 
 
-def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
+def reindex_incremental(vault_root: Path, store=None, state_path: Path | None = None) -> ReindexResult:
     """Reindex only files that have changed since the last run.
 
-    Uses a JSON state file (.zk/index_state.json) to track mtime, content hash,
-    and active embedding model per file. If the active model has changed since the
-    last run, all files are treated as dirty and re-embedded. Cleans up deleted
-    files from the index.
+    Uses a JSON state file to track mtime, content hash, and active embedding
+    model per file. state_path overrides the default location; when None, falls
+    back to .zk/index_state.json for backward compatibility.
     """
     from alaya.index.models import get_active_model
     active_model = get_active_model().key
@@ -89,7 +88,7 @@ def reindex_incremental(vault_root: Path, store=None) -> ReindexResult:
     if store is None:
         store = get_store(vault_root)
 
-    state_file = vault_root / ".zk" / "index_state.json"
+    state_file = state_path if state_path else vault_root / ".zk" / "index_state.json"
     raw_state: dict = json.loads(state_file.read_text()) if state_file.exists() else {}
 
     # State file format: {"_model": "...", "files": {rel_path: {mtime, hash}}}
@@ -169,7 +168,7 @@ _REEMBED_BATCH = 20      # notes per batch
 _REEMBED_SLEEP = 0.5     # seconds between batches
 
 
-def reembed_background(vault_root: Path, from_model: str, to_model: str, store=None) -> None:
+def reembed_background(vault_root: Path, from_model: str, to_model: str, store=None, state_path: Path | None = None) -> None:
     """Re-embed all notes in batches as a background migration.
 
     Called in a daemon thread when the active embedding model changes.
@@ -215,7 +214,7 @@ def reembed_background(vault_root: Path, from_model: str, to_model: str, store=N
             time.sleep(_REEMBED_SLEEP)
 
     # Write updated state file
-    state_file = vault_root / ".zk" / "index_state.json"
+    state_file = state_path if state_path else vault_root / ".zk" / "index_state.json"
     state_file.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(state_file, json.dumps({"_model": to_model, "files": new_state}, indent=2))
 

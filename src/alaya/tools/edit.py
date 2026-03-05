@@ -70,6 +70,7 @@ def extract_section(
     new_title: str,
     new_directory: str,
     vault: Path,
+    backend=None,
 ) -> str:
     """Extract a ## section into a new note and leave a wikilink in its place.
 
@@ -103,11 +104,19 @@ def extract_section(
             vault=vault,
         )
 
+        # Determine the wikilink key based on backend strategy
+        if backend:
+            new_file = vault / new_path  # nosemgrep: semgrep.alaya-path-traversal -- new_path from create_note() which validates via _validate_directory()
+            new_content = new_file.read_text() if new_file.exists() else ""
+            link_key = backend.note_link_key(new_file, new_content)
+        else:
+            link_key = new_title
+
         # replace section body in original with a wikilink (inline, lock already held)
         header_line = lines[start]
         before = lines[:start]
         after = lines[end:]
-        new_lines = before + [header_line, f"[[{new_title}]]"] + ([""] if after else []) + after
+        new_lines = before + [header_line, f"[[{link_key}]]"] + ([""] if after else []) + after
         atomic_write(path, "\n".join(new_lines) + "\n")
 
     return new_path
@@ -115,7 +124,7 @@ def extract_section(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
     @mcp.tool()
     def replace_section_tool(path: str, section: str, new_content: str) -> str:
         """Replace the content of a named ## section in a note."""
@@ -134,8 +143,8 @@ def _register(mcp: FastMCP, vault: Path) -> None:
     def extract_section_tool(source: str, section: str, new_title: str, new_directory: str) -> str:
         """Extract a ## section into a new note, leaving a wikilink in the original."""
         try:
-            new_path = extract_section(source, section, new_title, new_directory, vault)
-            return f"Extracted '{section}' from `{source}` → `{new_path}`."
+            new_path = extract_section(source, section, new_title, new_directory, vault, backend=backend)
+            return f"Extracted '{section}' from `{source}` -> `{new_path}`."
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except FileExistsError as e:
@@ -145,4 +154,3 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             if "SECTION_NOT_FOUND" in msg:
                 return error(SECTION_NOT_FOUND, msg)
             return error(OUTSIDE_VAULT, msg)
-

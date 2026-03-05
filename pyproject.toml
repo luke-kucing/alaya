@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.28",
     "watchdog>=6.0",
     "fastembed>=0.7.4",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

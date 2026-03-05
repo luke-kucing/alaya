@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT
-from alaya.vault import resolve_note_path
+from alaya.vault import resolve_note_path, _SKIP_DIRS
 from alaya.tools._locks import get_path_lock, atomic_write
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,7 @@ def get_todos(
 
     for root in search_roots:
         for md_file in root.rglob("*.md"):
-            # skip the .zk directory
-            if ".zk" in md_file.parts:
+            if any(part in _SKIP_DIRS for part in md_file.parts):
                 continue
             try:
                 rel = str(md_file.relative_to(vault))
