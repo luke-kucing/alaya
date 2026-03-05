@@ -1,8 +1,24 @@
-# zk-mcp Product Requirements Document
+# alaya Product Requirements Document
 
-**Version:** 1.1
-**Date:** 2026-02-27
-**Status:** Draft
+> **Note:** This document was written during the initial "alaya" planning phase (Feb 2026).
+> The project has since been renamed to **alaya** and evolved significantly:
+>
+> - **Pluggable vault backend:** `ZkBackend` (zk CLI) + `ObsidianBackend` (pure Python), not zk-only
+> - **VaultMetadataCache:** In-memory metadata index with O(1) title/stem lookups, wikilink graph, tag aggregation
+> - **Embeddings:** fastembed (ONNX), not fastembed
+> - **LRU-cached embed_query:** Avoids redundant CPU inference for repeated queries
+> - **Late chunking:** Full-doc embedding with per-chunk pooling for better cross-chunk context
+> - **Enrichment tools:** LLM-powered person cache and vault enrichment (enrich.py)
+> - **Multi-provider:** GitHub (gh CLI) + GitLab (glab CLI) + Outline API
+> - **Config:** `ALAYA_VAULT_DIR` env var (with `ZK_NOTEBOOK_DIR` compat), optional `alaya.toml`
+> - **PyPI:** Installable via `uvx alaya`
+> - **607+ unit tests** across zk, obsidian, cache, and all tool modules
+>
+> See the [README](../README.md) for current architecture and usage.
+
+**Version:** 2.0
+**Date:** 2026-03-05
+**Status:** Historical (v1 planning artifact)
 
 ---
 
@@ -22,7 +38,7 @@
 
 ### Product Vision
 
-`zk-mcp` makes Claude Code the primary interface for a `zk`-managed personal knowledge vault. Instead of switching between a terminal, a text editor, and a note browser, the user stays inside a single Claude session and converses — creating, searching, linking, synthesizing, and maintaining notes without ever touching a file directly. The server is a thin, composable wrapper over tools that already work (`zk`, `glab`, LanceDB, watchdog), not a reimplementation of any of them. The result is a second brain that is fully AI-addressable while remaining a plain-text, portable Markdown vault.
+`alaya` makes Claude Code the primary interface for a `zk`-managed personal knowledge vault. Instead of switching between a terminal, a text editor, and a note browser, the user stays inside a single Claude session and converses — creating, searching, linking, synthesizing, and maintaining notes without ever touching a file directly. The server is a thin, composable wrapper over tools that already work (`zk`, `glab`, LanceDB, watchdog), not a reimplementation of any of them. The result is a second brain that is fully AI-addressable while remaining a plain-text, portable Markdown vault.
 
 ---
 
@@ -32,7 +48,7 @@ Personal knowledge management tools either lock knowledge into proprietary forma
 
 The gap being filled: a user with 500 notes and a weekly review habit should be able to say "what did I know about zero trust networking when I talked to Sarah last month?" and get a synthesized, sourced answer — without leaving the terminal window they are already working in.
 
-Today, answering that question requires: `zk list`, `grep`, `zk list --linked-by`, reading several files, and mentally synthesizing the result. With `zk-mcp`, it is a single natural language question.
+Today, answering that question requires: `zk list`, `grep`, `zk list --linked-by`, reading several files, and mentally synthesizing the result. With `alaya`, it is a single natural language question.
 
 ---
 
@@ -63,12 +79,12 @@ v1 is done and working when all of the following are true:
 | Package manager | `uv` exclusively. No `pip install` or `poetry`. |
 | Python version | 3.12 or higher. |
 | MCP framework | FastMCP. No raw `mcp` protocol implementation. |
-| Embeddings | `sentence-transformers` with `nomic-embed-text-v1.5`, running locally on CPU. nomic-embed-text-v1.5 supports 8192 token context window, purpose-built for RAG and long document retrieval. Used via sentence-transformers ONNX backend (sentence-transformers[onnx]) to avoid PyTorch dependency. |
+| Embeddings | `fastembed` with `nomic-embed-text-v1.5`, running locally on CPU. nomic-embed-text-v1.5 supports 8192 token context window, purpose-built for RAG and long document retrieval. Used via fastembed ONNX backend (fastembed[onnx]) to avoid PyTorch dependency. |
 | No cloud vector store | LanceDB only, stored at `.zk/vectors/` inside the vault root. |
 | GitLab integration | `glab` CLI only. No direct GitLab API calls. |
 | Note format | Plain Markdown with minimal YAML frontmatter (title + date only) and inline `#tags` in note body. |
 | Link format | Wikilinks (`[[title]]`) as used by `zk`. |
-| Vault root | Configured via `ZK_NOTEBOOK_DIR` environment variable. Server never reads outside this directory. |
+| Vault root | Configured via `ALAYA_VAULT_DIR` environment variable (`ZK_NOTEBOOK_DIR` supported for backward compatibility). Server never reads outside this directory. |
 
 ---
 
@@ -88,7 +104,7 @@ v1 is done and working when all of the following are true:
                           FastMCP (stdio transport)
                                        |
 +-------------------------------------|-----------------------------+
-|                         zk-mcp Server                             |
+|                         alaya Server                             |
 |                                                                    |
 |  +----------------+  +------------------+  +------------------+  |
 |  |  Tool Layer    |  |  Index Layer     |  |  Watcher Layer   |  |
@@ -244,14 +260,14 @@ Claude reports result
 ### Project File Structure
 
 ```
-zk-mcp/
+alaya/
 ├── pyproject.toml              # uv project config, dependencies
 ├── uv.lock
 ├── README.md
-├── .env.example                # ZK_NOTEBOOK_DIR, GITLAB_PROJECT, etc.
+├── .env.example                # ALAYA_VAULT_DIR, GITLAB_PROJECT, etc.
 │
 ├── src/
-│   └── zk_mcp/
+│   └── alaya/
 │       ├── __init__.py
 │       ├── server.py           # FastMCP server definition, tool registration
 │       ├── config.py           # env var loading, vault root resolution
@@ -270,7 +286,7 @@ zk-mcp/
 │       │
 │       ├── index/              # LanceDB vector index management
 │       │   ├── __init__.py
-│       │   ├── embedder.py     # sentence-transformers wrapper, chunking logic
+│       │   ├── embedder.py     # fastembed wrapper, chunking logic
 │       │   ├── store.py        # LanceDB read/write operations
 │       │   └── reindex.py      # full reindex, incremental update logic
 │       │
@@ -365,7 +381,7 @@ Each milestone produces a working, testable system. Later milestones enhance the
 **Key Technical Tasks:**
 
 1. Initialize `uv` project with FastMCP, pydantic, zk subprocess wrapper.
-2. Implement `config.py`: read `ZK_NOTEBOOK_DIR`, validate vault root exists and contains `.zk/`.
+2. Implement `config.py`: read `ALAYA_VAULT_DIR` (or `ZK_NOTEBOOK_DIR`), validate vault root exists and contains `.zk/` or `.obsidian/`.
 3. Implement `zk.py`: `run_zk(args: list[str]) -> str` — subprocess wrapper with timeout, stderr capture, and `ZK_ERROR` exception.
 4. Implement `tools/read.py`: `get_note`, `list_notes`, `get_backlinks`, `get_links`, `get_tags`.
 5. Implement `tools/write.py`: `create_note`, `append_to_note`, `update_tags`. File I/O only — no index calls yet.
@@ -569,9 +585,9 @@ test_preconfirm_flag_skips_pause_but_still_announces
 **Key Technical Tasks:**
 
 1. Implement `index/embedder.py`:
-   - Load `nomic-embed-text-v1.5` on first use (lazy load to avoid slow startup). nomic-embed-text-v1.5 supports 8192 token context window, purpose-built for RAG and long document retrieval. Used via sentence-transformers ONNX backend (sentence-transformers[onnx]) to avoid PyTorch dependency.
+   - Load `nomic-embed-text-v1.5` on first use (lazy load to avoid slow startup). nomic-embed-text-v1.5 supports 8192 token context window, purpose-built for RAG and long document retrieval. Used via fastembed ONNX backend (fastembed[onnx]) to avoid PyTorch dependency.
    - `chunk_note(path, content) -> list[Chunk]`: split on `##` headers, each chunk gets `{path, title, tags, directory, modified_date, chunk_index, text}`.
-   - `embed_chunks(chunks) -> list[np.ndarray]`: batch encode with sentence-transformers.
+   - `embed_chunks(chunks) -> list[np.ndarray]`: batch encode with fastembed.
 2. Implement `index/store.py`:
    - `upsert_note(path, chunks, embeddings)`: replace all existing chunks for this path, insert new ones. Atomic per-note — no partial states.
    - `delete_note(path)`: remove all chunks for this path.
@@ -865,7 +881,7 @@ Tests are run with `uv run pytest`. Integration tests are marked with `@pytest.m
 | `glab` CLI | Mock `subprocess.run` in `glab.py`. Return canned JSON/text output per test case. |
 | File system | Use `tmp_path` pytest fixture for real temp directories. Do not mock file I/O — it is fast and writing to temp dirs is reliable. |
 | LanceDB | In unit tests for tools that call the index, mock `store.upsert_note`, `store.delete_note`, `store.hybrid_search`. Test the index layer itself separately in `tests/unit/index/`. |
-| sentence-transformers | In index unit tests, mock `SentenceTransformer.encode`. Return fixed-dimension random vectors. This avoids loading the model in unit tests (slow). |
+| fastembed | In index unit tests, mock `SentenceTransformer.encode`. Return fixed-dimension random vectors. This avoids loading the model in unit tests (slow). |
 | httpx / URL fetch | Mock in `ingest` unit tests. Return canned HTML content. |
 
 **Integration tests use real dependencies:**
@@ -875,7 +891,7 @@ Tests are run with `uv run pytest`. Integration tests are marked with `@pytest.m
 | `zk` CLI | Requires real `zk` binary installed. Tests run against `vault_fixture/` with a real `.zk/` directory initialized. |
 | File system | Real temp directory copied from `vault_fixture/` before each test, torn down after. |
 | LanceDB | Real LanceDB store in temp directory. Tests build the index from `vault_fixture/` notes. |
-| sentence-transformers | Real model loaded once per session (use `session`-scoped fixture). Slow on first run; model is cached by sentence-transformers in `~/.cache`. |
+| fastembed | Real model loaded once per session (use `session`-scoped fixture). Slow on first run; model is cached by fastembed in `~/.cache`. |
 | `glab` CLI | Requires real `glab` binary and `GITLAB_PROJECT` env var. M5 integration tests are skipped if env var is not set. |
 
 ---
@@ -885,7 +901,7 @@ Tests are run with `uv run pytest`. Integration tests are marked with `@pytest.m
 Each integration test:
 
 1. Copies `vault_fixture/` to a `tmp_path` temp directory.
-2. Sets `ZK_NOTEBOOK_DIR` to the temp directory.
+2. Sets `ALAYA_VAULT_DIR` to the temp directory.
 3. Runs `zk init` if needed (or uses the pre-initialized `.zk/` from the fixture copy).
 4. Instantiates the tool functions directly (not via FastMCP transport) for speed.
 5. Asserts outcomes against the real file system and real LanceDB.
@@ -906,7 +922,7 @@ For M3 and above, `vault_fixture/` is expanded to 100+ notes to test semantic se
 
 ### Key Test Categories
 
-**Tool unit tests** — fast, fully mocked, cover all parameter combinations and error paths. Every tool function has a corresponding test file. Coverage target: 90%+ on `src/zk_mcp/tools/`.
+**Tool unit tests** — fast, fully mocked, cover all parameter combinations and error paths. Every tool function has a corresponding test file. Coverage target: 90%+ on `src/alaya/tools/`.
 
 **Confirmation flow tests** — verify that the list of tools requiring confirmation matches the spec exactly. This is a simple unit test: instantiate each tool, check whether it is in the confirmed-required list. Also verify that `complete_todo`, `append_to_note`, and `capture_to_inbox` are NOT in the confirmed-required list.
 
@@ -924,7 +940,7 @@ For M3 and above, `vault_fixture/` is expanded to 100+ notes to test semantic se
 |---|---|---|---|---|
 | 1 | **zk CLI version incompatibility** — the server wraps `zk` CLI output and flag behavior. A `zk` version change could break JSON output format, flag names, or exit codes. | Medium | High | Pin the minimum `zk` version in documentation. Add a startup check: run `zk --version` and warn if the version is below the tested minimum. Parse `zk` output defensively — never assume a fixed field count. Integration tests catch breakage immediately. |
 | 2 | **LanceDB index drift** — the watchdog debounce, crash recovery, or rapid manual edits could leave LanceDB out of sync with the vault. Users may get stale or missing results without realizing it. | Medium | Medium | The fallback to `zk list --match` means stale index degrades search quality but does not break the system. Expose `/zk reindex` clearly. Consider adding a startup health check: compare note count in vault vs. LanceDB, warn if they diverge by more than 10%. |
-| 3 | **sentence-transformers model slow to load** — `nomic-embed-text-v1.5` takes 2–5 seconds to load on first use. If loaded at server startup, this delays the first MCP response. If lazy-loaded, the first `search_notes` call is slow. | High | Low | Lazy-load the model in a background thread 5 seconds after server startup. Cache the loaded model as a module-level singleton. This means the first call after a fresh start may be slow (model loading) but all subsequent calls are fast. Document the cold-start behavior. |
+| 3 | **fastembed model slow to load** — `nomic-embed-text-v1.5` takes 2–5 seconds to load on first use. If loaded at server startup, this delays the first MCP response. If lazy-loaded, the first `search_notes` call is slow. | High | Low | Lazy-load the model in a background thread 5 seconds after server startup. Cache the loaded model as a module-level singleton. This means the first call after a fresh start may be slow (model loading) but all subsequent calls are fast. Document the cold-start behavior. |
 | 4 | **Wikilink update false positives or misses** — the wikilink scan-and-replace logic must correctly match `[[old-title]]` across all notes without matching partial titles or plain text. A bug here could silently corrupt wikilinks across the vault. | Low | High | Use `find_references` as the authoritative source for what to update. Write a comprehensive wikilink consistency test suite that covers: exact title match, title as substring of another wikilink, titles with special characters, titles that appear in code blocks (should not be updated). Require the wikilink consistency tests to pass before M2 is marked done. |
 | 5 | **glab CLI not available or not authenticated** — GitLab tools fail silently or with confusing errors if `glab` is not installed or the user is not authenticated. | Medium | Medium | At server startup, if `GITLAB_PROJECT` is set, run `glab auth status` as a health check. Log a clear warning if it fails. All GitLab tools return `GITLAB_NOT_CONFIGURED` or `GITLAB_ERROR` with a clear message. Never allow a `glab` failure to crash the server — catch subprocess errors and return structured error responses. |
 
@@ -960,7 +976,7 @@ A running record of key decisions made during requirements and planning, for fut
 | LanceDB is additive | If `.zk/vectors/` is missing, server falls back to `zk list --match`. Index is never required for basic operation. | 2026-02-27 |
 | GitLab source of truth | Vault never stores issue state. All GitLab reads hit `glab` live. `issue_to_note` creates a snapshot, not a live mirror. | 2026-02-27 |
 | wikilink updates on move/rename | In scope for v1. Shared utility used by both `move_note` and `rename_note`. | 2026-02-27 |
-| Embedding model | nomic-embed-text-v1.5 via sentence-transformers ONNX backend. 8192 token context, RAG-optimized, no PyTorch runtime required. | 2026-02-27 |
+| Embedding model | nomic-embed-text-v1.5 via fastembed ONNX backend. 8192 token context, RAG-optimized, no PyTorch runtime required. | 2026-02-27 |
 | PDF extraction | pymupdf4llm over pdfplumber. Outputs clean Markdown, faster, better for chunking. Scanned PDFs return a clear error in v1 — no OCR. | 2026-02-27 |
 | Web extraction | trafilatura over readability-lxml. Better accuracy, actively maintained, has built-in focused crawler for link following. | 2026-02-27 |
 | HTTP client | httpx over requests. Async-safe for FastMCP tool functions. Drop-in replacement API. | 2026-02-27 |
@@ -978,7 +994,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=3.0.2",
     "lancedb>=0.29,<0.31",
-    "sentence-transformers[onnx]>=5.2",
+    "fastembed[onnx]>=5.2",
     "pymupdf4llm>=0.0.17",
     "trafilatura>=2.0",
     "httpx>=0.28",

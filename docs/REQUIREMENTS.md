@@ -1,8 +1,20 @@
-# zk-mcp Requirements Document
+# alaya Requirements Document
 
-**Version:** 1.4
-**Date:** 2026-02-27
-**Status:** Draft - Final
+> **Note:** This document was written during the initial "alaya" planning phase (Feb 2026).
+> The project has since been renamed to **alaya** and evolved significantly:
+>
+> - **Pluggable vault backend:** `ZkBackend` (zk CLI) + `ObsidianBackend` (pure Python), not zk-only
+> - **VaultMetadataCache:** In-memory metadata index with O(1) title/stem lookups
+> - **Embeddings:** fastembed (ONNX), not fastembed
+> - **Multi-provider:** GitHub (gh CLI) + GitLab (glab CLI) + Outline API
+> - **Config:** `ALAYA_VAULT_DIR` env var, optional `alaya.toml`
+> - **607+ unit tests**
+>
+> See the [README](../README.md) for current architecture and usage.
+
+**Version:** 2.0
+**Date:** 2026-03-05
+**Status:** Historical (v1 planning artifact)
 
 ---
 
@@ -22,7 +34,7 @@
 
 ### What This Is
 
-`zk-mcp` is a FastMCP server that exposes a `zk`-managed note vault to Claude Code as a set of structured tools. It turns Claude into the primary interface for a personal second brain — capable of reading, writing, searching, linking, and synthesizing notes across the full vault.
+`alaya` is a FastMCP server that exposes a `zk`-managed note vault to Claude Code as a set of structured tools. It turns Claude into the primary interface for a personal second brain — capable of reading, writing, searching, linking, and synthesizing notes across the full vault.
 
 This is not a query layer. It is full read/write access, designed so that the user rarely needs to open a text editor or run `zk` commands manually.
 
@@ -67,7 +79,7 @@ This is not a query layer. It is full read/write access, designed so that the us
 | Note format | Markdown with minimal YAML frontmatter (title + date) and inline #tags |
 | Link format | Wikilinks (`[[title]]`) |
 | Vector store | LanceDB (local, Apache Arrow format) |
-| Embeddings | sentence-transformers `nomic-embed-text-v1.5` (local, no API) |
+| Embeddings | fastembed `nomic-embed-text-v1.5` (local, no API) |
 | Search mode | Hybrid (vector + keyword via LanceDB) |
 | GitLab integration | glab CLI |
 | File watching | watchdog (Python) |
@@ -329,7 +341,7 @@ These are not server-side functions — they are Claude's responsibility, using 
 |---|---|
 | R-VS-01 | The server must maintain a LanceDB vector index at `.zk/vectors/` within the vault root. |
 | R-VS-02 | Notes are chunked by section (split on `##` headers) before embedding — each chunk stored with metadata: `path`, `title`, `tags`, `directory`, `modified_date`, `chunk_index`. |
-| R-VS-03 | Embeddings are generated using `sentence-transformers` with model `nomic-embed-text-v1.5`, running locally with no external API dependency. nomic-embed-text-v1.5 supports 8192 token context window, purpose-built for RAG and long document retrieval. Used via sentence-transformers ONNX backend (sentence-transformers[onnx]) to avoid PyTorch dependency. |
+| R-VS-03 | Embeddings are generated using `fastembed` with model `nomic-embed-text-v1.5`, running locally with no external API dependency. nomic-embed-text-v1.5 supports 8192 token context window, purpose-built for RAG and long document retrieval. Used via fastembed ONNX backend (fastembed[onnx]) to avoid PyTorch dependency. |
 | R-VS-04 | The vector index must be updated incrementally on every write operation: `create_note` and `append_to_note` re-embed the affected note; `move_note` and `rename_note` update path/title metadata without re-embedding; `update_tags` updates tag metadata without re-embedding; `delete_note` removes the note from the active index (archived notes are excluded from search by default); `replace_section` re-embeds the affected note; `ingest` chunks and embeds the ingested document content alongside regular notes, tagged with `source_type: ingested` metadata for filtering. |
 | R-VS-05 | A full reindex operation must be available via the `reindex_vault` tool and the `/zk reindex` skill. |
 | R-VS-06 | `search_notes` must use LanceDB hybrid search (vector + keyword) as its primary retrieval mechanism, replacing the zk `--match` keyword-only approach. |
@@ -1249,7 +1261,7 @@ The skill is invoked as `/zk [subcommand] [args]` from any Claude Code session w
 
 | ID | Requirement |
 |---|---|
-| NF-CF-01 | Vault root is configured via an environment variable `ZK_NOTEBOOK_DIR` (same as the zk CLI). |
+| NF-CF-01 | Vault root is configured via `ALAYA_VAULT_DIR` environment variable (`ZK_NOTEBOOK_DIR` supported for backward compatibility). |
 | NF-CF-02 | The server must respect `.zk/config.toml` for any zk-level settings (e.g., default language, date format). |
 | NF-CF-03 | Templates are loaded from `.zk/templates/` within the vault. |
 
