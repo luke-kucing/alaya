@@ -59,11 +59,18 @@ def get_note(relative_path: str, vault: Path) -> str:
     return _format_note(relative_path, path.read_text())
 
 
-def get_note_by_title(title: str, vault: Path) -> str:
+def get_note_by_title(title: str, vault: Path, cache=None) -> str:
     """Find a note by its frontmatter title and return formatted content.
 
     Raises FileNotFoundError if no match, ValueError if multiple matches.
     """
+    if cache:
+        rel = cache.title_to_path(title)
+        if not rel:
+            raise FileNotFoundError(f"No note found with title: {title!r}")
+        path = vault / rel
+        return _format_note(rel, path.read_text())
+
     from alaya.vault import iter_vault_md as _iter_vault_md
     title_lower = title.lower()
     matches = []
@@ -244,7 +251,7 @@ def get_tags(vault: Path, backend=None) -> str:
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
     @mcp.tool()
     def get_note_tool(path: str = "", title: str = "") -> str:
         """Read a note. Provide exactly one of path (relative path) or title (frontmatter title)."""
@@ -254,7 +261,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
             return error(INVALID_ARGUMENT, "Either path or title is required.")
         try:
             if title:
-                return get_note_by_title(title, vault)
+                return get_note_by_title(title, vault, cache=cache)
             return get_note(path, vault)
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))

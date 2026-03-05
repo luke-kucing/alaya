@@ -1,6 +1,7 @@
 """Embedder: chunk notes and embed with fastembed (model from registry)."""
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 from dataclasses import dataclass
@@ -42,10 +43,12 @@ def get_model():
 
 def reset_model() -> None:
     """Clear the cached model. Intended for use in tests only."""
-    global _model, _loaded_model_key
+    global _model, _loaded_model_key, _embed_query_cache_key, _embed_query_cached
     with _model_lock:
         _model = None
         _loaded_model_key = None
+    _embed_query_cache_key = None
+    _embed_query_cached = None
 
 
 @dataclass
@@ -76,12 +79,35 @@ def chunk_note(path: str, content: str, contextual: bool = True) -> list[Chunk]:
     return chunks
 
 
+_embed_query_cache_key: str | None = None
+_embed_query_cached = None
+
+
+def _make_embed_query_cache():
+    """Create a new LRU-cached embed function bound to the current model."""
+    @functools.lru_cache(maxsize=128)
+    def _cached_embed(text: str) -> bytes:
+        model, cfg = get_model()
+        raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text}"])))
+        norm = np.linalg.norm(raw[0])
+        vec = (raw[0] / (norm if norm else 1)).astype(np.float32)
+        return vec.tobytes()
+    return _cached_embed
+
+
 def embed_query(text: str) -> np.ndarray:
-    """Embed a search query string. Returns a normalized float32 vector."""
-    model, cfg = get_model()
-    raw = np.array(list(model.query_embed([f"{cfg.search_prefix}{text}"])))
-    norm = np.linalg.norm(raw[0])
-    return (raw[0] / (norm if norm else 1)).astype(np.float32)
+    """Embed a search query string. Returns a normalized float32 vector.
+
+    Results are LRU-cached (up to 128 entries) per model key to avoid
+    redundant CPU inference for repeated queries.
+    """
+    global _embed_query_cache_key, _embed_query_cached
+    cfg = get_active_model()
+    if _embed_query_cached is None or _embed_query_cache_key != cfg.key:
+        _embed_query_cached = _make_embed_query_cache()
+        _embed_query_cache_key = cfg.key
+    raw_bytes = _embed_query_cached(text)
+    return np.frombuffer(raw_bytes, dtype=np.float32).copy()
 
 
 def embed_chunks(chunks: list[Chunk], full_text: str | None = None) -> list[np.ndarray]:

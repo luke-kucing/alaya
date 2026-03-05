@@ -7,12 +7,24 @@ from fastmcp import FastMCP
 logger = logging.getLogger(__name__)
 
 
+_hybrid_available_cache: bool | None = None
+
+
 def _hybrid_search_available(vault: Path) -> bool:
-    """Return True if a LanceDB index exists and has rows."""
+    """Return True if a LanceDB index exists and has rows.
+
+    Result is cached after the first True to avoid repeated store lookups.
+    """
+    global _hybrid_available_cache
+    if _hybrid_available_cache:
+        return True
     try:
         from alaya.index.store import get_store
         store = get_store(vault)
-        return store.count() > 0
+        result = store.count() > 0
+        if result:
+            _hybrid_available_cache = True
+        return result
     except Exception:
         return False
 
@@ -137,6 +149,7 @@ def search_notes(
     graph_expand: bool = False,
     hyde: bool = False,
     backend=None,
+    cache=None,
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
 
@@ -149,7 +162,7 @@ def search_notes(
         )
         if graph_expand and results:
             from alaya.index.graph_rag import expand_with_graph
-            results = expand_with_graph(results, vault)[:limit]
+            results = expand_with_graph(results, vault, cache=cache)[:limit]
         if not results:
             return "No notes matching that query."
         rows = [
@@ -206,7 +219,7 @@ def search_notes(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
     @mcp.tool()
     def search_notes_tool(
         query: str,
@@ -242,4 +255,5 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
             graph_expand=graph_expand,
             hyde=hyde,
             backend=backend,
+            cache=cache,
         )
