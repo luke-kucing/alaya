@@ -84,8 +84,22 @@ def embed_query(text: str) -> np.ndarray:
     return (raw[0] / (norm if norm else 1)).astype(np.float32)
 
 
-def embed_chunks(chunks: list[Chunk]) -> list[np.ndarray]:
-    """Embed a list of chunks. Returns one normalized float32 ndarray per chunk."""
+def embed_chunks(chunks: list[Chunk], full_text: str | None = None) -> list[np.ndarray]:
+    """Embed a list of chunks. Returns one normalized float32 ndarray per chunk.
+
+    When full_text is provided and the active model supports late chunking,
+    uses late chunking (full doc -> token embeddings -> per-chunk pooling)
+    for better cross-chunk context preservation.
+    """
+    # Try late chunking if full document text is available
+    if full_text is not None:
+        from alaya.index.late_chunking import supports_late_chunking, embed_chunks_late
+        if supports_late_chunking():
+            result = embed_chunks_late(full_text, chunks)
+            if result is not None:
+                return result
+
+    # Standard chunk-then-embed approach
     model, cfg = get_model()
     texts = [f"{cfg.document_prefix}{c.text}" for c in chunks]
     raw = np.array(list(model.embed(texts)))
