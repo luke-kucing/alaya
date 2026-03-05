@@ -385,6 +385,34 @@ def _vector_search(
     return _dedup_by_path_vector(results, limit)
 
 
+def keyword_search(
+    query: str,
+    store: VaultStore,
+    directory: str | None = None,
+    tags: list[str] | None = None,
+    since: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """FTS-only search using BM25. Best for short exact-term queries.
+
+    Returns list of {path, title, directory, score, text}.
+    """
+    if store.count() == 0 or not store.ensure_fts_index():
+        return []
+
+    where = _build_filter(directory, tags, since)
+    try:
+        table = store._get_table()
+        q = table.search(query, query_type="fts").limit(limit * 4)
+        if where:
+            q = q.where(where)
+        results = q.to_list()
+        return _dedup_by_path(results, limit)
+    except _STORE_ERRORS as e:
+        logger.debug("keyword_search failed: %s", e)
+        return []
+
+
 _reranker_lock = threading.Lock()
 _reranker_instance: Any = None
 
