@@ -8,7 +8,7 @@ A FastMCP server that makes Claude Code the primary interface for a personal kno
 
 ```bash
 # 1. Register with Claude Code (one command, no clone needed)
-claude mcp add alaya -e ALAYA_VAULT_DIR=$HOME/notes -- uvx alaya
+claude mcp add alaya -e ALAYA_VAULT_DIR=$HOME/notes -- uvx alaya-mcp
 
 # 2. Start Claude Code — alaya connects automatically
 claude
@@ -371,7 +371,7 @@ Pass additional env vars when registering with Claude Code using `-e`:
 claude mcp add alaya \
   -e ALAYA_VAULT_DIR=$HOME/notes \
   -e GITHUB_REPO=owner/repo \
-  -- uvx alaya
+  -- uvx alaya-mcp
 ```
 
 Configure any combination of providers. `pull_external` and `push_external` auto-detect the provider from URLs or use the configured defaults.
