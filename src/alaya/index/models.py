@@ -13,6 +13,7 @@ class EmbeddingModelConfig:
     dimensions: int
     search_prefix: str
     document_prefix: str
+    supports_late_chunking: bool = False  # model supports contextual chunk embeddings
 
 
 MODELS: dict[str, EmbeddingModelConfig] = {
@@ -31,6 +32,15 @@ MODELS: dict[str, EmbeddingModelConfig] = {
         dimensions=768,
         search_prefix="search_query: ",
         document_prefix="search_document: ",
+    ),
+    "jina-v3": EmbeddingModelConfig(
+        key="jina-v3",
+        name="jinaai/jina-embeddings-v3",
+        file_name=None,
+        dimensions=1024,
+        search_prefix="",
+        document_prefix="",
+        supports_late_chunking=True,
     ),
 }
 

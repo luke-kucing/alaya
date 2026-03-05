@@ -18,6 +18,10 @@ dependencies = [
 rerank = [
     "sentence-transformers>=3.0",
 ]
+late-chunking = [
+    "transformers>=4.40",
+    "torch>=2.0",
+]
 
 [dependency-groups]
 dev = [
