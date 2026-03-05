@@ -49,7 +49,10 @@ def _load_person_cache(vault: Path, people_dir: str = "people") -> dict[str, str
             return _person_cache[resolved]
 
         mapping: dict[str, str] = {}
-        people_path = vault / people_dir
+        # nosemgrep: semgrep.alaya-path-traversal -- people_dir from backend config, validated below
+        people_path = (vault / people_dir).resolve()
+        if not people_path.is_relative_to(vault.resolve()):
+            return mapping
         if people_path.is_dir():
             for md_file in people_path.glob("*.md"):
                 try:

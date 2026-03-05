@@ -157,14 +157,17 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None, arch
     Raises ValueError if the note is already in archives/.
     """
     src = resolve_note_path(relative_path, vault)
-    archive_path = vault / archives_dir
+    # nosemgrep: semgrep.alaya-path-traversal -- archives_dir from backend config, validated below
+    archive_path = (vault / archives_dir).resolve()
+    if not archive_path.is_relative_to(vault.resolve()):
+        raise ValueError(f"Archives directory '{archives_dir}' escapes vault root")
     archive_path.mkdir(exist_ok=True)
 
     with get_path_lock(src):
         if not src.exists():
             raise FileNotFoundError(f"Note not found: {relative_path}")
 
-        if src.resolve().is_relative_to((vault / archives_dir).resolve()):
+        if src.resolve().is_relative_to(archive_path):
             raise ValueError(f"Note is already archived: {relative_path}")
 
         if reason:
@@ -180,7 +183,7 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None, arch
                 counter += 1
         shutil.move(str(src), str(dest))
 
-    archive_relative = str(dest.relative_to(vault))
+    archive_relative = str(dest.relative_to(vault.resolve()))
     emit(NoteEvent(EventType.DELETED, relative_path))
     return archive_relative
 
