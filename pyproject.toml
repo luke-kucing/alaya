@@ -4,6 +4,17 @@ version = "0.1.0"
 description = "A second brain -- FastMCP server for personal knowledge vaults (zk and Obsidian)"
 readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+authors = [{name = "Luke Kucing"}]
+keywords = ["mcp", "knowledge-base", "zettelkasten", "obsidian", "rag"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: General",
+]
 dependencies = [
     "fastmcp>=3.0.2",
     "lancedb>=0.29",
@@ -37,6 +48,10 @@ testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (require real zk binary and vault)",
 ]
+
+[project.urls]
+Repository = "https://github.com/luke-kucing/alaya"
+Issues = "https://github.com/luke-kucing/alaya/issues"
 
 [project.scripts]
 alaya = "alaya.server:main"

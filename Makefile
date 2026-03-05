@@ -1,4 +1,4 @@
-.PHONY: help install test test-unit test-integration lint serve
+.PHONY: help install test test-unit test-integration lint serve publish
 .DEFAULT_GOAL := help
 
 help:
@@ -26,3 +26,8 @@ lint: ## Lint source and tests
 
 serve: ## Start the server
 	uv run alaya
+
+##@ Publishing
+publish: ## Build distribution and check with twine
+	uv build
+	uv tool run twine check dist/*
