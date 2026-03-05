@@ -59,11 +59,21 @@ class Chunk:
     text: str
 
 
-def chunk_note(path: str, content: str) -> list[Chunk]:
-    """Split a note into chunks using the appropriate strategy for its content."""
+def chunk_note(path: str, content: str, contextual: bool = True) -> list[Chunk]:
+    """Split a note into chunks using the appropriate strategy for its content.
+
+    When contextual=True (default), prepends metadata context to each chunk
+    for improved retrieval accuracy (contextual retrieval technique).
+    """
     from alaya.index.chunking import select_strategy, ChunkConfig
     strategy = select_strategy(path, content)
-    return strategy.chunk(path, content, ChunkConfig())
+    chunks = strategy.chunk(path, content, ChunkConfig())
+
+    if contextual:
+        from alaya.index.contextual import add_chunk_context
+        chunks = add_chunk_context(chunks)
+
+    return chunks
 
 
 def embed_query(text: str) -> np.ndarray:
