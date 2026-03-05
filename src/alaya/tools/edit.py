@@ -106,8 +106,7 @@ def extract_section(
 
         # Determine the wikilink key based on backend strategy
         if backend:
-            # nosemgrep: semgrep.alaya-path-traversal -- new_path from create_note() which validates via _validate_directory()
-            new_file = vault / new_path
+            new_file = vault / new_path  # nosemgrep: semgrep.alaya-path-traversal -- new_path from create_note() which validates via _validate_directory()
             new_content = new_file.read_text() if new_file.exists() else ""
             link_key = backend.note_link_key(new_file, new_content)
         else:

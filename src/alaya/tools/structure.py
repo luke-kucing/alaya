@@ -179,7 +179,7 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None, arch
             stem, suffix = src.stem, src.suffix
             counter = 1
             while dest.exists():
-                dest = archive_path / f"{stem}-{counter}{suffix}"
+                dest = archive_path / f"{stem}-{counter}{suffix}"  # nosemgrep: semgrep.alaya-path-traversal -- archive_path validated on line 161
                 counter += 1
         shutil.move(str(src), str(dest))
 
