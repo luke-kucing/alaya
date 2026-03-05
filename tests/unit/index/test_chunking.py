@@ -140,6 +140,6 @@ class TestSelectStrategy:
         strategy = select_strategy("notes/work.md", "## Section\nBody.")
         assert isinstance(strategy, SectionChunker)
 
-    def test_flat_note_returns_sliding_window(self):
+    def test_flat_note_returns_semantic_chunker(self):
         strategy = select_strategy("notes/flat.md", "No headers at all.")
-        assert isinstance(strategy, SlidingWindowChunker)
+        assert isinstance(strategy, SemanticChunker)

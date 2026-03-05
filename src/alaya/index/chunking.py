@@ -196,11 +196,12 @@ def select_strategy(path: str, content: str) -> ChunkingStrategy:
     directory = path.split("/")[0] if "/" in path else ""
     if directory == "daily":
         return DailyNoteChunker()
-    # check the body (after frontmatter) for section headers
     note = parse_note(content)
     if "## " in note.body:
         return SectionChunker()
-    return SlidingWindowChunker()
+    # SemanticChunker splits on paragraph boundaries with code block awareness,
+    # producing better chunks than the naive sliding window for prose-heavy notes.
+    return SemanticChunker()
 
 
 # --- helpers ---

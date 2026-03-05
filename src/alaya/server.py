@@ -12,17 +12,25 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     name="alaya",
     instructions=(
-        "You are connected to a zk-managed personal knowledge vault. "
-        "Use the available tools to read, write, search, and organize notes. "
-        "Always confirm before moving, renaming, deleting, or bulk-modifying notes. "
-        "Capture is always safe — no confirmation needed for append or inbox operations. "
-        "If search results seem stale or incomplete, call vault_health to check index sync status."
+        "You are connected to a zk-managed personal knowledge vault.\n\n"
+        "CAPTURE RULES:\n"
+        "- When the user shares a thought, observation, or experience, use smart_capture immediately.\n"
+        "- NEVER paraphrase, summarize, or reword user input. Capture their exact words verbatim.\n"
+        "- NEVER ask 'where should I put this?' -- smart_capture routes automatically.\n"
+        "- Only use create_note or append_to_note when the user gives explicit structural instructions "
+        "(specific directory, specific title, specific section).\n"
+        "- No confirmation needed for capture or append operations. They are always safe.\n\n"
+        "DESTRUCTIVE OPERATIONS:\n"
+        "- Always confirm before moving, renaming, deleting, or bulk-modifying notes.\n\n"
+        "SEARCH:\n"
+        "- If search results seem stale or incomplete, call vault_health to check index sync status.\n"
+        "- Use search_notes for retrieval. Use smart_capture for input."
     ),
 )
 
 # Explicit registration: server -> tools (one direction only).
 # vault is resolved once here and closed over in each tool wrapper.
-from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, stats, graph  # noqa: E402
+from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, stats, graph, capture  # noqa: E402
 
 def _register_all(vault: Path) -> None:
     read._register(mcp, vault)
@@ -36,6 +44,30 @@ def _register_all(vault: Path) -> None:
     ingest._register(mcp, vault)
     stats._register(mcp, vault)
     graph._register(mcp, vault)
+    capture._register(mcp, vault)
+
+
+def _instrument_tools(vault: Path) -> None:
+    """Wrap all registered MCP tools with audit logging."""
+    import asyncio
+    import time
+    from alaya.audit import log_tool_call
+
+    tools = asyncio.get_event_loop().run_until_complete(mcp.list_tools())
+    for tool in tools:
+        original_fn = tool.fn
+        tool_name = tool.name
+
+        def _make_wrapper(_orig=original_fn, _name=tool_name):
+            def wrapper(*args, **kwargs):
+                start = time.perf_counter()
+                result = _orig(*args, **kwargs)
+                elapsed = (time.perf_counter() - start) * 1000
+                log_tool_call(vault, _name, kwargs, str(result)[:200], elapsed)
+                return result
+            return wrapper
+
+        tool.fn = _make_wrapper()
 
 
 def _register_index_listener(vault: Path, watcher_handler=None) -> None:
@@ -170,6 +202,7 @@ def main() -> None:
 
     _register_all(vault_root)
     _register_health_tool(vault_root)
+    _instrument_tools(vault_root)
 
     from alaya.index.store import get_store, get_index_model
     from alaya.index.models import get_active_model

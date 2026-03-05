@@ -59,6 +59,7 @@ class VaultStore:
     def __post_init__(self) -> None:
         self._init_lock = threading.Lock()
         self._needs_reindex: bool = False
+        self._fts_ready: bool = False
 
     def _connect(self) -> Any:
         if self._db is None:
@@ -110,6 +111,25 @@ class VaultStore:
             return self._get_table().count_rows()
         except _STORE_ERRORS:
             return 0
+
+    def ensure_fts_index(self) -> bool:
+        """Create FTS index on the text column if not already done.
+
+        Returns True if FTS is available for hybrid search.
+        Safe to call repeatedly — only creates the index once.
+        """
+        if self._fts_ready:
+            return True
+        try:
+            table = self._get_table()
+            if table.count_rows() == 0:
+                return False
+            table.create_fts_index("text", replace=True)
+            self._fts_ready = True
+            return True
+        except _STORE_ERRORS as e:
+            logger.debug("FTS index creation failed (will use vector-only): %s", e)
+            return False
 
 
 def get_index_model(store: VaultStore) -> str | None:
@@ -222,6 +242,60 @@ def update_metadata(
         logger.warning("Failed to update metadata for %s: %s", old_path, e)
 
 
+def _build_filter(
+    directory: str | None,
+    tags: list[str] | None,
+    since: str | None,
+) -> str | None:
+    """Build a SQL WHERE clause from optional metadata filters."""
+    filters = []
+    if directory:
+        filters.append(f"directory = '{_sq(directory)}'")
+    if tags:
+        for tag in tags:
+            filters.append(f"tags LIKE '%,{_sq_like(tag)},%' ESCAPE '\\'")
+    if since:
+        filters.append(f"modified_date >= '{_sq(since)}'")
+    return " AND ".join(filters) if filters else None
+
+
+def _dedup_by_path(results: list[dict], limit: int) -> list[dict]:
+    """Keep the highest-scoring chunk per note path."""
+    seen: dict[str, dict] = {}
+    for row in results:
+        score = float(row.get("_relevance_score", 0.0))
+        path = row["path"]
+        if path not in seen or score > seen[path]["score"]:
+            seen[path] = {
+                "path": path,
+                "title": row["title"],
+                "directory": row["directory"],
+                "score": round(score, 3),
+                "text": row["text"],
+            }
+    output = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
+    return output[:limit]
+
+
+def _dedup_by_path_vector(results: list[dict], limit: int) -> list[dict]:
+    """Keep the highest-scoring chunk per note path (vector-only results use _distance)."""
+    seen: dict[str, dict] = {}
+    for row in results:
+        distance = float(row.get("_distance", 1.0))
+        score = max(0.0, 1.0 - distance)
+        path = row["path"]
+        if path not in seen or score > seen[path]["score"]:
+            seen[path] = {
+                "path": path,
+                "title": row["title"],
+                "directory": row["directory"],
+                "score": round(score, 3),
+                "text": row["text"],
+            }
+    output = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
+    return output[:limit]
+
+
 def hybrid_search(
     query: str,
     query_embedding: np.ndarray,
@@ -230,59 +304,115 @@ def hybrid_search(
     tags: list[str] | None = None,
     since: str | None = None,
     limit: int = 10,
+    rerank: bool = False,
 ) -> list[dict]:
-    """Vector ANN search with optional metadata pre-filter.
+    """Search using LanceDB native hybrid search (vector + BM25 FTS) with RRF.
 
+    Falls back to vector-only search if the FTS index is not available.
+    When rerank=True, applies a cross-encoder reranker on the top candidates
+    for higher precision (adds latency).
     Returns list of {path, title, directory, score, text}.
     """
     if store.count() == 0:
         return []
 
+    where = _build_filter(directory, tags, since)
+    # When reranking, fetch more candidates so the cross-encoder has a larger pool
+    candidate_limit = limit * 8 if rerank else limit * 4
+
+    # Try native hybrid search (vector + FTS with RRF reranking)
+    results: list[dict] = []
+    if store.ensure_fts_index():
+        try:
+            raw = _hybrid_search_native(query, query_embedding, store, where, candidate_limit)
+            results = _dedup_by_path(raw, candidate_limit)
+        except _STORE_ERRORS as e:
+            logger.debug("Native hybrid search failed, falling back to vector-only: %s", e)
+
+    # Fallback: vector-only search
+    if not results:
+        try:
+            results = _vector_search(query_embedding, store, where, candidate_limit, candidate_limit)
+        except _STORE_ERRORS as e:
+            logger.warning("hybrid_search failed for query %r: %s", query, e)
+            return []
+
+    # Optional cross-encoder reranking for higher precision
+    if rerank and results:
+        results = _cross_encoder_rerank(query, results, limit)
+    else:
+        results = results[:limit]
+
+    return results
+
+
+def _hybrid_search_native(
+    query: str,
+    query_embedding: np.ndarray,
+    store: VaultStore,
+    where: str | None,
+    fetch_limit: int,
+) -> list[dict]:
+    """Run LanceDB native hybrid search: vector + FTS combined via RRF."""
+    from lancedb.rerankers import RRFReranker
+
+    table = store._get_table()
+    q = (
+        table.search(query, query_type="hybrid", vector_column_name="vector")
+        .vector(query_embedding.tolist())
+        .text(query)
+        .rerank(RRFReranker())
+        .limit(fetch_limit)
+    )
+    if where:
+        q = q.where(where)
+    return q.to_list()
+
+
+def _vector_search(
+    query_embedding: np.ndarray,
+    store: VaultStore,
+    where: str | None,
+    fetch_limit: int,
+    limit: int,
+) -> list[dict]:
+    """Fallback: vector-only ANN search."""
+    table = store._get_table()
+    q = table.search(query_embedding.tolist(), vector_column_name="vector").limit(fetch_limit)
+    if where:
+        q = q.where(where)
+    results = q.to_list()
+    return _dedup_by_path_vector(results, limit)
+
+
+_reranker_lock = threading.Lock()
+_reranker_instance: Any = None
+
+
+def _get_cross_encoder() -> Any:
+    """Lazy-load the cross-encoder model (singleton)."""
+    global _reranker_instance
+    if _reranker_instance is None:
+        with _reranker_lock:
+            if _reranker_instance is None:
+                from sentence_transformers import CrossEncoder
+                _reranker_instance = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return _reranker_instance
+
+
+def _cross_encoder_rerank(query: str, results: list[dict], limit: int) -> list[dict]:
+    """Rerank results using a cross-encoder for higher precision."""
     try:
-        table = store._get_table()
-
-        q = table.search(query_embedding.tolist(), vector_column_name="vector")
-
-        filters = []
-        if directory:
-            filters.append(f"directory = '{_sq(directory)}'")
-        if tags:
-            for tag in tags:
-                # tags column is comma-bounded (e.g. ",python,web,"); match whole tags
-                filters.append(f"tags LIKE '%,{_sq_like(tag)},%' ESCAPE '\\'")
-        if since:
-            filters.append(f"modified_date >= '{_sq(since)}'")
-        if filters:
-            q = q.where(" AND ".join(filters))
-
-        # fetch more candidates than limit to allow deduplication by path
-        results = q.limit(limit * 4).to_list()
-
-        # score each chunk, then keep best chunk per path (dedup)
-        seen: dict[str, dict] = {}
-        for row in results:
-            text = row.get("text", "").lower()
-            keyword_boost = sum(1 for term in query.lower().split() if term in text)
-            score = float(row.get("_distance", 1.0))
-            similarity = max(0.0, 1.0 - score)
-            final_score = min(1.0, similarity + keyword_boost * 0.05)
-
-            path = row["path"]
-            if path not in seen or final_score > seen[path]["score"]:
-                seen[path] = {
-                    "path": path,
-                    "title": row["title"],
-                    "directory": row["directory"],
-                    "score": round(final_score, 3),
-                    "text": row["text"],
-                }
-
-        output = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
-        return output[:limit]
-
-    except _STORE_ERRORS as e:
-        logger.warning("hybrid_search failed for query %r: %s", query, e)
-        return []
+        model = _get_cross_encoder()
+        pairs = [[query, r["text"]] for r in results]
+        scores = model.predict(pairs)
+        for r, score in zip(results, scores):
+            r["score"] = round(float(score), 3)
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results[:limit]
+    except Exception as e:
+        logger.warning("Cross-encoder reranking failed, returning RRF results: %s", e)
+        return results[:limit]
 
 
 _store_cache: dict[Path, VaultStore] = {}
