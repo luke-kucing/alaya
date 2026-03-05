@@ -6,6 +6,7 @@ import pytest
 
 from alaya.backend.protocol import LinkResolution, VaultConfig
 from alaya.backend.obsidian import ObsidianBackend
+from alaya.cache import VaultMetadataCache
 
 
 OBSIDIAN_FIXTURE_PATH = Path(__file__).parent.parent.parent.parent / "vault_fixture_obsidian"
@@ -28,6 +29,20 @@ def backend(obs_vault: Path) -> ObsidianBackend:
         link_resolution=LinkResolution.FILENAME,
     )
     return ObsidianBackend(config)
+
+
+@pytest.fixture
+def cached_backend(obs_vault: Path) -> ObsidianBackend:
+    """ObsidianBackend with a warmed VaultMetadataCache."""
+    config = VaultConfig(
+        root=obs_vault,
+        vault_type="obsidian",
+        data_dir_name=".obsidian",
+        link_resolution=LinkResolution.FILENAME,
+    )
+    cache = VaultMetadataCache(obs_vault)
+    cache.warm()
+    return ObsidianBackend(config, cache=cache)
 
 
 class TestListNotes:
@@ -181,3 +196,95 @@ class TestNoteLinkKey:
 class TestCheckAvailable:
     def test_always_succeeds(self, backend: ObsidianBackend) -> None:
         backend.check_available()  # should not raise
+
+
+# --- Cached backend: same assertions, proving cache path produces identical results ---
+
+class TestCachedListNotes:
+    def test_lists_all_notes(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.list_notes(limit=100)
+        paths = [e.path for e in entries]
+        assert any("second-brain" in p for p in paths)
+        assert any("kubernetes-notes" in p for p in paths)
+
+    def test_filter_by_directory(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.list_notes(directory="Ideas")
+        assert len(entries) >= 1
+        assert all(e.path.startswith("Ideas/") for e in entries)
+
+    def test_filter_by_tag(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.list_notes(tag="kubernetes")
+        assert len(entries) >= 1
+        assert all("kubernetes" in e.tags for e in entries)
+
+    def test_limit_works(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.list_notes(limit=2)
+        assert len(entries) <= 2
+
+
+class TestCachedGetBacklinks:
+    def test_finds_backlinks_by_filename(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.get_backlinks("Projects/second-brain.md")
+        paths = [e.path for e in entries]
+        assert any("voice-capture" in p for p in paths)
+
+    def test_backlinks_to_alice(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.get_backlinks("People/alice-johnson.md")
+        paths = [e.path for e in entries]
+        assert any("second-brain" in p for p in paths)
+
+
+class TestCachedGetOutlinks:
+    def test_finds_outlinks(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.get_outlinks("Projects/second-brain.md")
+        paths = [e.path for e in entries]
+        assert any("kubernetes-notes" in p for p in paths)
+        assert any("alice-johnson" in p for p in paths)
+
+    def test_no_outlinks_returns_empty(self, cached_backend: ObsidianBackend, obs_vault: Path) -> None:
+        (obs_vault / "Ideas" / "isolated.md").write_text(
+            "---\ntitle: Isolated\ndate: 2026-01-01\n---\nNo links here."
+        )
+        cached_backend.cache.invalidate("Ideas/isolated.md")
+        entries = cached_backend.get_outlinks("Ideas/isolated.md")
+        assert entries == []
+
+
+class TestCachedListTags:
+    def test_lists_all_tags(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.list_tags()
+        names = [e.name for e in entries]
+        assert "project" in names
+        assert "kubernetes" in names
+        assert "idea" in names
+
+    def test_counts_are_positive(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.list_tags()
+        for entry in entries:
+            assert entry.count > 0
+
+
+class TestCachedKeywordSearch:
+    def test_finds_notes_by_content(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.keyword_search("Kubernetes")
+        paths = [e.path for e in entries]
+        assert any("kubernetes-notes" in p for p in paths)
+
+    def test_case_insensitive(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.keyword_search("kubernetes")
+        assert len(entries) >= 1
+
+    def test_no_results_returns_empty(self, cached_backend: ObsidianBackend) -> None:
+        entries = cached_backend.keyword_search("xyznotfound12345")
+        assert entries == []
+
+
+class TestCachedResolveWikilink:
+    def test_resolves_by_filename_stem(self, cached_backend: ObsidianBackend) -> None:
+        result = cached_backend.resolve_wikilink("second-brain")
+        assert result is not None
+        assert result.stem == "second-brain"
+
+    def test_returns_none_for_unknown(self, cached_backend: ObsidianBackend) -> None:
+        result = cached_backend.resolve_wikilink("nonexistent-note")
+        assert result is None

@@ -35,7 +35,7 @@ class VaultEventHandler(FileSystemEventHandler):
     to avoid redundant re-indexing.
     """
 
-    def __init__(self, vault: Path, store: VaultStore, debounce_seconds: float = _DEBOUNCE_SECONDS) -> None:
+    def __init__(self, vault: Path, store: VaultStore, debounce_seconds: float = _DEBOUNCE_SECONDS, cache=None) -> None:
         super().__init__()
         self.vault = vault
         self.store = store
@@ -44,6 +44,7 @@ class VaultEventHandler(FileSystemEventHandler):
         self._recently_indexed: dict[str, float] = {}
         self._lock = threading.Lock()
         self._ingest_threads: list[threading.Thread] = []
+        self._cache = cache
 
     def mark_indexed(self, relative_path: str) -> None:
         """Mark a path as recently indexed by the event system."""
@@ -96,6 +97,8 @@ class VaultEventHandler(FileSystemEventHandler):
             if self._was_recently_indexed(rel):
                 logger.debug("Skipping watcher upsert for %s (already indexed by event)", rel)
                 return
+            if self._cache:
+                self._cache.invalidate(rel)
             content = path.read_text()
             chunks = chunk_note(rel, content)
             if not chunks:
@@ -141,6 +144,8 @@ class VaultEventHandler(FileSystemEventHandler):
             return
         if Path(src).suffix.lower() == ".md":
             rel = self._relative(src)
+            if self._cache:
+                self._cache.remove(rel)
             if not self._was_recently_indexed(rel):
                 delete_note_from_index(rel, self.store)
 
@@ -177,9 +182,9 @@ class VaultEventHandler(FileSystemEventHandler):
                 logger.warning("Ingest thread did not finish within %ss during shutdown", timeout)
 
 
-def start_watcher(vault: Path, store: VaultStore) -> tuple[Observer, VaultEventHandler]:
+def start_watcher(vault: Path, store: VaultStore, cache=None) -> tuple[Observer, VaultEventHandler]:
     """Start the watchdog observer. Returns (observer, handler)."""
-    handler = VaultEventHandler(vault=vault, store=store)
+    handler = VaultEventHandler(vault=vault, store=store, cache=cache)
     observer = Observer()
     observer.schedule(handler, str(vault), recursive=True)
     observer.start()

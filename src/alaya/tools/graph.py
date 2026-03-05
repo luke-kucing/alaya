@@ -29,6 +29,7 @@ def vault_graph(
     directory: str = "",
     max_nodes: int = 200,
     link_resolution: LinkResolution = LinkResolution.TITLE,
+    cache=None,
 ) -> str:
     """Return the vault's wikilink graph as JSON.
 
@@ -38,29 +39,40 @@ def vault_graph(
     nodes: dict[str, dict] = {}  # rel_path -> metadata
     edges: list[tuple[str, str]] = []  # (source_path, target_key)
 
-    for md_file in _iter_vault_md(vault):
-        rel = str(md_file.relative_to(vault))
+    if cache:
+        for n in cache.iter_notes():
+            if directory and not n.path.startswith(directory.rstrip("/") + "/"):
+                continue
+            if len(nodes) >= max_nodes:
+                break
+            top_dir = n.path.split("/")[0] if "/" in n.path else ""
+            nodes[n.path] = {"title": n.title, "tags": n.tags, "directory": top_dir}
+            for link in n.outlinks:
+                edges.append((n.path, link))
+    else:
+        for md_file in _iter_vault_md(vault):
+            rel = str(md_file.relative_to(vault))
 
-        if directory and not rel.startswith(directory.rstrip("/") + "/"):
-            continue
-        if len(nodes) >= max_nodes:
-            break
+            if directory and not rel.startswith(directory.rstrip("/") + "/"):
+                continue
+            if len(nodes) >= max_nodes:
+                break
 
-        try:
-            content = md_file.read_text()
-        except OSError:
-            continue
+            try:
+                content = md_file.read_text()
+            except OSError:
+                continue
 
-        note = parse_note(content)
-        top_dir = rel.split("/")[0] if "/" in rel else ""
-        nodes[rel] = {
-            "title": note.title or md_file.stem,
-            "tags": note.tags,
-            "directory": top_dir,
-        }
+            note = parse_note(content)
+            top_dir = rel.split("/")[0] if "/" in rel else ""
+            nodes[rel] = {
+                "title": note.title or md_file.stem,
+                "tags": note.tags,
+                "directory": top_dir,
+            }
 
-        for match in _WIKILINK_RE.finditer(content):
-            edges.append((rel, match.group(1).strip()))
+            for match in _WIKILINK_RE.finditer(content):
+                edges.append((rel, match.group(1).strip()))
 
     # Build key -> path lookup based on link resolution strategy
     key_to_path = _build_key_to_path(nodes, link_resolution)
@@ -102,7 +114,7 @@ def vault_graph(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
     _link_res = backend.config.link_resolution if backend else LinkResolution.TITLE
 
     @mcp.tool()
@@ -112,4 +124,4 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         directory: limit to notes under this directory (optional).
         max_nodes: cap on nodes scanned (default 200).
         """
-        return vault_graph(vault, directory=directory, max_nodes=max_nodes, link_resolution=_link_res)
+        return vault_graph(vault, directory=directory, max_nodes=max_nodes, link_resolution=_link_res, cache=cache)

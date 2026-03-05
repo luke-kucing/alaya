@@ -20,6 +20,7 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 def _build_link_index(
     vault: Path,
     link_resolution: LinkResolution = LinkResolution.TITLE,
+    cache=None,
 ) -> tuple[dict[str, set[str]], dict[str, str]]:
     """Build outgoing links and key->path lookup for the vault.
 
@@ -27,6 +28,18 @@ def _build_link_index(
     - outlinks[path] = set of linked keys (titles or filename stems)
     - key_to_path[key] = path
     """
+    if cache:
+        outlinks: dict[str, set[str]] = {}
+        key_to_path: dict[str, str] = {}
+        for n in cache.iter_notes():
+            if link_resolution == LinkResolution.FILENAME:
+                key = n.stem
+            else:
+                key = n.title or n.stem
+            key_to_path[key] = n.path
+            outlinks[n.path] = set(n.outlinks)
+        return outlinks, key_to_path
+
     outlinks: dict[str, set[str]] = {}
     key_to_path: dict[str, str] = {}
 
@@ -68,6 +81,7 @@ def expand_with_graph(
     vault: Path,
     max_expansion: int = 5,
     link_resolution: LinkResolution = LinkResolution.TITLE,
+    cache=None,
 ) -> list[dict]:
     """Augment search results by traversing 1-hop wikilinks.
 
@@ -87,7 +101,7 @@ def expand_with_graph(
     if not results:
         return results
 
-    outlinks, key_to_path = _build_link_index(vault, link_resolution)
+    outlinks, key_to_path = _build_link_index(vault, link_resolution, cache=cache)
     inlinks = _invert_links(outlinks, key_to_path)
 
     result_paths = {r["path"] for r in results}

@@ -20,8 +20,9 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 class ObsidianBackend:
     """VaultBackend implementation for Obsidian vaults (pure Python, no CLI)."""
 
-    def __init__(self, config: VaultConfig) -> None:
+    def __init__(self, config: VaultConfig, cache=None) -> None:
         self.config = config
+        self.cache = cache
 
     # -- Protocol methods --
 
@@ -34,6 +35,9 @@ class ObsidianBackend:
         until: str | None = None,
         sort: str | None = None,
     ) -> list[NoteEntry]:
+        if self.cache:
+            return self._list_notes_cached(directory, tag, limit, since, until, sort)
+
         entries: list[NoteEntry] = []
 
         for md_file in iter_vault_md(self.config.root):
@@ -80,8 +84,38 @@ class ObsidianBackend:
 
         return entries[:limit]
 
+    def _list_notes_cached(self, directory, tag, limit, since, until, sort):
+        entries: list[NoteEntry] = []
+        for n in self.cache.iter_notes():
+            if directory and not n.path.startswith(directory.rstrip("/") + "/"):
+                continue
+            if tag and tag not in n.tags:
+                continue
+            if since and n.date < since:
+                continue
+            if until and n.date > until:
+                continue
+            tags_str = " ".join(f"#{t}" for t in n.tags)
+            entries.append(NoteEntry(path=n.path, title=n.title, date=n.date, tags=tags_str))
+
+        if sort == "title":
+            entries.sort(key=lambda e: e.title.lower())
+        elif sort == "created":
+            entries.sort(key=lambda e: e.date, reverse=True)
+        else:
+            entries.sort(key=lambda e: e.path, reverse=True)
+        return entries[:limit]
+
     def get_backlinks(self, relative_path: str) -> list[LinkEntry]:
         """Find notes that link to relative_path using [[filename]] wikilinks."""
+        if self.cache:
+            entries = []
+            for src_path in self.cache.get_inlinks(relative_path):
+                meta = self.cache.get_meta(src_path)
+                if meta:
+                    entries.append(LinkEntry(path=src_path, title=meta.title))
+            return entries
+
         target_stem = Path(relative_path).stem
         entries: list[LinkEntry] = []
 
@@ -106,6 +140,16 @@ class ObsidianBackend:
 
     def get_outlinks(self, relative_path: str) -> list[LinkEntry]:
         """Find notes linked from relative_path."""
+        if self.cache:
+            entries = []
+            for link_text in self.cache.get_outlinks(relative_path):
+                target_path = self.cache.stem_to_path(link_text)
+                if target_path:
+                    meta = self.cache.get_meta(target_path)
+                    if meta:
+                        entries.append(LinkEntry(path=target_path, title=meta.title))
+            return entries
+
         full_path = self.config.root / relative_path
         if not full_path.exists():
             return []
@@ -142,6 +186,10 @@ class ObsidianBackend:
 
     def list_tags(self) -> list[TagEntry]:
         """Scan all notes for tags (YAML frontmatter + inline)."""
+        if self.cache:
+            tag_counts = self.cache.all_tags()
+            return [TagEntry(name=name, count=count) for name, count in sorted(tag_counts.items())]
+
         tag_counts: dict[str, int] = {}
 
         for md_file in iter_vault_md(self.config.root):
@@ -167,6 +215,9 @@ class ObsidianBackend:
         limit: int = 20,
     ) -> list[NoteEntry]:
         """Simple substring search across all .md files."""
+        if self.cache:
+            return self._keyword_search_cached(query, directory, tags, since, limit)
+
         query_lower = query.lower()
         entries: list[NoteEntry] = []
 
@@ -201,8 +252,39 @@ class ObsidianBackend:
 
         return entries
 
+    def _keyword_search_cached(self, query, directory, tags, since, limit):
+        """Keyword search using cache for metadata, still reads content for matching."""
+        query_lower = query.lower()
+        entries: list[NoteEntry] = []
+
+        for n in self.cache.iter_notes():
+            if directory and not n.path.startswith(directory.rstrip("/") + "/"):
+                continue
+            if tags and not any(t in n.tags for t in tags):
+                continue
+            if since and n.date < since:
+                continue
+
+            try:
+                content = (self.config.root / n.path).read_text()
+            except OSError:
+                continue
+
+            if query_lower not in content.lower():
+                continue
+
+            entries.append(NoteEntry(path=n.path, title=n.title, date=n.date))
+            if len(entries) >= limit:
+                break
+
+        return entries
+
     def resolve_wikilink(self, link_text: str) -> Path | None:
         """Resolve a filename-based wikilink to a file path (shortest path wins)."""
+        if self.cache:
+            rel = self.cache.stem_to_path(link_text)
+            return (self.config.root / rel) if rel else None
+
         candidates: list[Path] = []
 
         for md_file in iter_vault_md(self.config.root):
