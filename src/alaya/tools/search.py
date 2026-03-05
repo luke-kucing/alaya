@@ -22,6 +22,7 @@ def _run_hybrid_search(
     tags: list[str] | None = None,
     since: str | None = None,
     limit: int = 20,
+    rerank: bool = False,
 ) -> list[dict]:
     """Embed the query and run hybrid search against LanceDB."""
     from alaya.index.embedder import embed_query
@@ -29,7 +30,10 @@ def _run_hybrid_search(
 
     query_embedding = embed_query(query)
     store = get_store(vault)
-    return hybrid_search(query, query_embedding, store, directory=directory, tags=tags, since=since, limit=limit)
+    return hybrid_search(
+        query, query_embedding, store,
+        directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
+    )
 
 
 def search_notes(
@@ -39,6 +43,7 @@ def search_notes(
     tags: list[str] | None = None,
     since: str | None = None,
     limit: int = 20,
+    rerank: bool = False,
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
 
@@ -46,7 +51,9 @@ def search_notes(
     zk keyword search otherwise.
     """
     if _hybrid_search_available(vault):
-        results = _run_hybrid_search(query, vault, directory=directory, tags=tags, since=since, limit=limit)
+        results = _run_hybrid_search(
+            query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
+        )
         if not results:
             return "No notes matching that query."
         rows = [
@@ -101,8 +108,12 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         tags: list[str] | None = None,
         since: str = "",
         limit: int = 20,
+        rerank: bool = False,
     ) -> str:
-        """Search notes by keyword or semantic query. Filter by directory, tags, or since date."""
+        """Search notes by keyword or semantic query. Filter by directory, tags, or since date.
+
+        Set rerank=True for higher precision (uses cross-encoder, adds latency).
+        """
         return search_notes(
             query,
             vault,
@@ -110,5 +121,6 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             tags=tags or None,
             since=since or None,
             limit=limit,
+            rerank=rerank,
         )
 
