@@ -1,4 +1,4 @@
-"""Audit logging: append structured tool call entries to .zk/audit.jsonl."""
+"""Audit logging: append structured tool call entries to the vault data dir."""
 import json
 import threading
 import time
@@ -26,8 +26,13 @@ def log_tool_call(
     args: dict,
     result_summary: str,
     duration_ms: float,
+    audit_path: Path | None = None,
 ) -> None:
-    """Append a structured entry to .zk/audit.jsonl."""
+    """Append a structured entry to the audit log.
+
+    audit_path overrides the default location. When None, falls back to
+    .zk/audit.jsonl for backward compatibility.
+    """
     status = "error" if result_summary.startswith("ERROR") else "ok"
 
     entry = {
@@ -39,12 +44,15 @@ def log_tool_call(
         "summary": result_summary[:_MAX_ARG_LEN],
     }
 
-    audit_dir = vault / ".zk"
-    audit_dir.mkdir(parents=True, exist_ok=True)
-    audit_file = audit_dir / "audit.jsonl"
+    if audit_path is None:
+        audit_dir = vault / ".zk"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_path = audit_dir / "audit.jsonl"
+    else:
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
 
     line = json.dumps(entry, ensure_ascii=False) + "\n"
 
     with _lock:
-        with open(audit_file, "a", encoding="utf-8") as f:
+        with open(audit_path, "a", encoding="utf-8") as f:
             f.write(line)

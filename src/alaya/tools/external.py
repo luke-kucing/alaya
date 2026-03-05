@@ -149,18 +149,20 @@ def _find_note_by_url(url: str, vault: Path) -> str | None:
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
+    _default_dir = backend.config.default_external_dir if backend else "projects"
+
     @mcp.tool()
     def pull_external_tool(
         source: str,
-        directory: str = "projects",
+        directory: str = "",
         tags: list[str] | None = None,
     ) -> str:
         """Pull an external item (GitLab/GitHub issue) into the vault as a note.
 
         source: URL or shorthand (gitlab:open, github:assigned, github:label=bug).
         """
-        return pull_external(source, directory, tags or [], vault)
+        return pull_external(source, directory or _default_dir, tags or [], vault)
 
     @mcp.tool()
     def push_external_tool(

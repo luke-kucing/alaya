@@ -17,7 +17,8 @@ _DAILY_TRIGGERS = frozenset({
     "standup", "daily", "end of day", "eod",
 })
 
-_INTENT_DIR_MAP = {
+# Default intent -> directory mapping (overridden by backend config when available)
+_DEFAULT_DIR_MAP = {
     "person": "people",
     "idea": "ideas",
     "project": "projects",
@@ -37,7 +38,7 @@ def invalidate_person_cache(vault: Path) -> None:
         _person_cache.pop(vault.resolve(), None)
 
 
-def _load_person_cache(vault: Path) -> dict[str, str]:
+def _load_person_cache(vault: Path, people_dir: str = "people") -> dict[str, str]:
     """Build or return cached name -> relative path mapping."""
     resolved = vault.resolve()
     if resolved in _person_cache:
@@ -48,9 +49,9 @@ def _load_person_cache(vault: Path) -> dict[str, str]:
             return _person_cache[resolved]
 
         mapping: dict[str, str] = {}
-        people_dir = vault / "people"
-        if people_dir.is_dir():
-            for md_file in people_dir.glob("*.md"):
+        people_path = vault / people_dir
+        if people_path.is_dir():
+            for md_file in people_path.glob("*.md"):
                 try:
                     content = md_file.read_text()
                 except OSError:
@@ -64,9 +65,9 @@ def _load_person_cache(vault: Path) -> dict[str, str]:
         return mapping
 
 
-def _detect_person(text: str, vault: Path) -> str | None:
+def _detect_person(text: str, vault: Path, people_dir: str = "people") -> str | None:
     """Return relative path to a matching person note, or None."""
-    people = _load_person_cache(vault)
+    people = _load_person_cache(vault, people_dir)
     for name, rel_path in people.items():
         if re.search(r"\b" + re.escape(name) + r"\b", text, re.IGNORECASE):
             return rel_path
@@ -97,10 +98,10 @@ def _find_matching_note(text: str, vault: Path) -> dict | None:
     return None
 
 
-def _ensure_daily_note(vault: Path) -> str:
+def _ensure_daily_note(vault: Path, daily_dir: str = "daily") -> str:
     """Return relative path to today's daily note, creating it if needed."""
     today = date.today().isoformat()
-    rel_path = f"daily/{today}.md"
+    rel_path = f"{daily_dir}/{today}.md"
     full_path = vault / rel_path
 
     if full_path.exists():
@@ -108,7 +109,7 @@ def _ensure_daily_note(vault: Path) -> str:
 
     return create_note(
         title=today,
-        directory="daily",
+        directory=daily_dir,
         tags=[],
         body="",
         vault=vault,
@@ -123,11 +124,12 @@ def _derive_title(text: str, max_words: int = 6) -> str:
     return " ".join(words) if words else "untitled"
 
 
-def _infer_directory(intent: str | None) -> str:
+def _infer_directory(intent: str | None, dir_map: dict[str, str] | None = None, default: str = "ideas") -> str:
     """Map an intent string to a vault directory."""
-    if intent and intent in _INTENT_DIR_MAP:
-        return _INTENT_DIR_MAP[intent]
-    return "ideas"
+    mapping = dir_map or _DEFAULT_DIR_MAP
+    if intent and intent in mapping:
+        return mapping[intent]
+    return default
 
 
 def _append_to_section_or_eof(
@@ -137,12 +139,16 @@ def _append_to_section_or_eof(
     try:
         append_to_note(rel_path, text, vault, section_header=section, dated=dated)
     except ValueError:
-        # Section not found — append at end of file
+        # Section not found -- append at end of file
         append_to_note(rel_path, text, vault, dated=dated)
 
 
 def smart_capture(
-    text: str, vault: Path, intent: str | None = None, fallback: str = "inbox"
+    text: str, vault: Path, intent: str | None = None, fallback: str = "inbox",
+    dir_map: dict[str, str] | None = None,
+    people_dir: str = "people",
+    daily_dir: str = "daily",
+    default_capture_dir: str = "ideas",
 ) -> str:
     """Capture text to the vault, routing automatically to the right note.
 
@@ -150,14 +156,14 @@ def smart_capture(
     """
     # Step 1: Person routing
     if intent == "person" or not intent:
-        person_path = _detect_person(text, vault)
+        person_path = _detect_person(text, vault, people_dir)
         if person_path:
             _append_to_section_or_eof(person_path, text, vault, "Notes", dated=True)
             return f"Appended to `{person_path}` (person match)."
 
     # Step 2: Daily routing
     if intent == "daily" or (not intent and _detect_daily(text)):
-        daily_path = _ensure_daily_note(vault)
+        daily_path = _ensure_daily_note(vault, daily_dir)
         _append_to_section_or_eof(daily_path, text, vault, "Notes", dated=False)
         return f"Appended to `{daily_path}` (daily note)."
 
@@ -171,7 +177,7 @@ def smart_capture(
     # Step 4: Fallback
     if fallback == "create":
         title = _derive_title(text)
-        directory = _infer_directory(intent)
+        directory = _infer_directory(intent, dir_map, default_capture_dir)
         path = create_note(
             title=title,
             directory=directory,
@@ -187,7 +193,19 @@ def smart_capture(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
+    # Extract config from backend if available
+    if backend:
+        _dir_map = backend.config.directory_map
+        _people_dir = backend.config.people_dir
+        _daily_dir = backend.config.daily_dir
+        _default_capture = backend.config.default_capture_dir
+    else:
+        _dir_map = _DEFAULT_DIR_MAP
+        _people_dir = "people"
+        _daily_dir = "daily"
+        _default_capture = "ideas"
+
     @mcp.tool()
     def smart_capture_tool(
         text: str,
@@ -209,6 +227,10 @@ def _register(mcp: FastMCP, vault: Path) -> None:
                 vault,
                 intent=intent or None,
                 fallback=fallback or "inbox",
+                dir_map=_dir_map,
+                people_dir=_people_dir,
+                daily_dir=_daily_dir,
+                default_capture_dir=_default_capture,
             )
         except (FileNotFoundError, ValueError) as e:
             return error(INVALID_ARGUMENT, str(e))

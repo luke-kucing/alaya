@@ -88,7 +88,7 @@ def _parse_inline_tags(body: str) -> list[str]:
 
 
 # Top-level vault directories to skip during full-vault scans.
-_SKIP_DIRS = {".zk", ".git", ".venv", "__pycache__"}
+_SKIP_DIRS = {".zk", ".obsidian", ".git", ".venv", "__pycache__", ".trash"}
 
 
 def iter_vault_md(vault: Path):

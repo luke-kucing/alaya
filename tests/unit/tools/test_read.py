@@ -95,46 +95,46 @@ class TestGetNote:
 
 class TestListNotes:
     def test_returns_markdown_table(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()):
+        with patch("alaya.zk.run_zk", return_value=ZK_LIST_OUTPUT.strip()):
             result = list_notes(vault)
         assert "|" in result  # markdown table
         assert "second-brain" in result
 
     def test_filter_by_dir(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
             list_notes(vault, directory="projects")
         args = mock_zk.call_args[0][0]
         assert "projects" in args
 
     def test_filter_by_tag(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
             list_notes(vault, tag="kubernetes")
         args = mock_zk.call_args[0][0]
         assert any("kubernetes" in a for a in args)
 
     def test_empty_vault_returns_message(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=""):
+        with patch("alaya.zk.run_zk", return_value=""):
             result = list_notes(vault)
         assert "no notes" in result.lower()
 
     # --- since / until / recent / sort (R-RD-03, R-SQ-02, R-SQ-04) ---
 
     def test_since_passes_modified_after_to_zk(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
             list_notes(vault, since="2026-01-01")
         args = mock_zk.call_args[0][0]
         assert "--modified-after" in args
         assert "2026-01-01" in args
 
     def test_until_passes_modified_before_to_zk(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
             list_notes(vault, until="2026-02-28")
         args = mock_zk.call_args[0][0]
         assert "--modified-before" in args
         assert "2026-02-28" in args
 
     def test_recent_converts_to_modified_after(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
             list_notes(vault, recent=7)
         args = mock_zk.call_args[0][0]
         assert "--modified-after" in args
@@ -144,7 +144,7 @@ class TestListNotes:
         assert args[idx + 1] == cutoff.isoformat()
 
     def test_sort_passes_sort_flag_to_zk(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_LIST_OUTPUT.strip()) as mock_zk:
             list_notes(vault, sort="modified")
         args = mock_zk.call_args[0][0]
         assert "--sort" in args
@@ -157,19 +157,19 @@ class TestListNotes:
 
 class TestGetBacklinks:
     def test_returns_backlinks(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_BACKLINKS_OUTPUT.strip()):
+        with patch("alaya.zk.run_zk", return_value=ZK_BACKLINKS_OUTPUT.strip()):
             result = get_backlinks("projects/second-brain.md", vault)
         assert "second-brain" in result
         assert "2026-02-25" in result
 
     def test_no_backlinks_returns_message(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=""):
+        with patch("alaya.zk.run_zk", return_value=""):
             result = get_backlinks("ideas/voice-capture.md", vault)
         assert "no backlinks" in result.lower()
 
     def test_uses_link_to_flag(self, vault: Path) -> None:
         # --link-to PATH finds notes linking TO PATH (i.e. backlinks)
-        with patch("alaya.tools.read.run_zk", return_value=ZK_BACKLINKS_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_BACKLINKS_OUTPUT.strip()) as mock_zk:
             get_backlinks("projects/second-brain.md", vault)
         args = mock_zk.call_args[0][0]
         assert "--link-to" in args
@@ -182,19 +182,19 @@ class TestGetBacklinks:
 
 class TestGetLinks:
     def test_returns_outgoing_links(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LINKS_OUTPUT.strip()):
+        with patch("alaya.zk.run_zk", return_value=ZK_LINKS_OUTPUT.strip()):
             result = get_links("projects/second-brain.md", vault)
         assert "kubernetes-notes" in result
         assert "platform-migration" in result
 
     def test_no_links_returns_message(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=""):
+        with patch("alaya.zk.run_zk", return_value=""):
             result = get_links("ideas/voice-capture.md", vault)
         assert "no links" in result.lower()
 
     def test_uses_linked_by_flag(self, vault: Path) -> None:
         # --linked-by PATH finds notes linked by PATH (i.e. forward/outgoing links)
-        with patch("alaya.tools.read.run_zk", return_value=ZK_LINKS_OUTPUT.strip()) as mock_zk:
+        with patch("alaya.zk.run_zk", return_value=ZK_LINKS_OUTPUT.strip()) as mock_zk:
             get_links("projects/second-brain.md", vault)
         args = mock_zk.call_args[0][0]
         assert "--linked-by" in args
@@ -203,13 +203,13 @@ class TestGetLinks:
 
 class TestGetTags:
     def test_returns_all_tags_with_counts(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_TAGS_OUTPUT.strip()):
+        with patch("alaya.zk.run_zk", return_value=ZK_TAGS_OUTPUT.strip()):
             result = get_tags(vault)
         assert "kubernetes" in result
         assert "3" in result
 
     def test_returns_markdown_table(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=ZK_TAGS_OUTPUT.strip()):
+        with patch("alaya.zk.run_zk", return_value=ZK_TAGS_OUTPUT.strip()):
             result = get_tags(vault)
         assert "|" in result
 
@@ -238,11 +238,11 @@ class TestRejectFlag:
             list_notes(vault, until="--inject")
 
     def test_normal_directory_allowed(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=""):
+        with patch("alaya.zk.run_zk", return_value=""):
             result = list_notes(vault, directory="projects")
         assert result == "No notes found."
 
     def test_normal_tag_allowed(self, vault: Path) -> None:
-        with patch("alaya.tools.read.run_zk", return_value=""):
+        with patch("alaya.zk.run_zk", return_value=""):
             result = list_notes(vault, tag="kubernetes")
         assert result == "No notes found."

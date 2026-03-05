@@ -7,19 +7,36 @@ from pathlib import Path
 from fastmcp import FastMCP
 from alaya.vault import parse_note
 from alaya.vault import iter_vault_md as _iter_vault_md
+from alaya.backend.protocol import LinkResolution
 
 # Matches [[Title]] and [[Title|alias]]
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 
 
-def vault_graph(vault: Path, directory: str = "", max_nodes: int = 200) -> str:
+def _build_key_to_path(
+    nodes: dict[str, dict],
+    link_resolution: LinkResolution,
+) -> dict[str, str]:
+    """Build a wikilink-key -> path lookup based on resolution strategy."""
+    if link_resolution == LinkResolution.FILENAME:
+        return {Path(path).stem: path for path, meta in nodes.items()}
+    # Default: title-based (zk)
+    return {meta["title"]: path for path, meta in nodes.items()}
+
+
+def vault_graph(
+    vault: Path,
+    directory: str = "",
+    max_nodes: int = 200,
+    link_resolution: LinkResolution = LinkResolution.TITLE,
+) -> str:
     """Return the vault's wikilink graph as JSON.
 
     Includes node count, edge count, orphan notes (nothing links to them),
     and hub notes (most linked-to). Useful for understanding knowledge topology.
     """
     nodes: dict[str, dict] = {}  # rel_path -> metadata
-    edges: list[tuple[str, str]] = []  # (source_path, target_title)
+    edges: list[tuple[str, str]] = []  # (source_path, target_key)
 
     for md_file in _iter_vault_md(vault):
         rel = str(md_file.relative_to(vault))
@@ -45,20 +62,20 @@ def vault_graph(vault: Path, directory: str = "", max_nodes: int = 200) -> str:
         for match in _WIKILINK_RE.finditer(content):
             edges.append((rel, match.group(1).strip()))
 
-    # Build title -> path lookup for resolving wikilinks
-    title_to_path = {meta["title"]: path for path, meta in nodes.items()}
+    # Build key -> path lookup based on link resolution strategy
+    key_to_path = _build_key_to_path(nodes, link_resolution)
 
     # Resolve edges to paths where possible; count in-links per node
     inlink_counts: Counter = Counter()
     resolved_edges = []
-    for src, target_title in edges:
-        target_path = title_to_path.get(target_title)
-        resolved_edges.append({"source": src, "target": target_path or target_title})
+    for src, target_key in edges:
+        target_path = key_to_path.get(target_key)
+        resolved_edges.append({"source": src, "target": target_path or target_key})
         if target_path:
             inlink_counts[target_path] += 1
 
     # Orphans: notes with zero inlinks AND zero outlinks to known nodes
-    outlink_to_known = {src for src, target_title in edges if title_to_path.get(target_title)}
+    outlink_to_known = {src for src, target_key in edges if key_to_path.get(target_key)}
     orphans = [
         path for path in nodes
         if inlink_counts[path] == 0 and path not in outlink_to_known
@@ -85,7 +102,9 @@ def vault_graph(vault: Path, directory: str = "", max_nodes: int = 200) -> str:
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
+    _link_res = backend.config.link_resolution if backend else LinkResolution.TITLE
+
     @mcp.tool()
     def vault_graph_tool(directory: str = "", max_nodes: int = 200) -> str:
         """Return the vault's wikilink graph as JSON. Finds orphan notes and hub topics.
@@ -93,4 +112,4 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         directory: limit to notes under this directory (optional).
         max_nodes: cap on nodes scanned (default 200).
         """
-        return vault_graph(vault, directory=directory, max_nodes=max_nodes)
+        return vault_graph(vault, directory=directory, max_nodes=max_nodes, link_resolution=_link_res)

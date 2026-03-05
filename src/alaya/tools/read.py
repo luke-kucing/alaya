@@ -4,13 +4,6 @@ from pathlib import Path
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.vault import resolve_note_path, parse_note
-from alaya.zk import run_zk, ZKError, _reject_flag
-
-
-def _tsv(line: str, count: int) -> tuple[str, ...]:
-    """Split a TSV line and return exactly *count* fields, padding with empty strings."""
-    parts = line.split("\t")
-    return tuple(parts[i] if i < len(parts) else "" for i in range(count))
 
 
 def reindex_vault(vault: Path, confirm: bool = False, force: bool = False) -> str:
@@ -88,7 +81,7 @@ def get_note_by_title(title: str, vault: Path) -> str:
         raise FileNotFoundError(f"No note found with title: {title!r}")
     if len(matches) > 1:
         paths = ", ".join(str(f.relative_to(vault)) for f, _ in matches)
-        raise ValueError(f"Ambiguous title {title!r} — matches: {paths}")
+        raise ValueError(f"Ambiguous title {title!r} -- matches: {paths}")
 
     md_file, content = matches[0]
     relative_path = str(md_file.relative_to(vault))
@@ -104,103 +97,154 @@ def list_notes(
     until: str | None = None,
     recent: int | None = None,
     sort: str | None = None,
+    backend=None,
 ) -> str:
     """Return a Markdown table of notes, optionally filtered/sorted.
 
-    since/until: ISO date strings for modification date range.
-    recent: shorthand for notes modified in the last N days.
-    sort: one of 'modified', 'created', 'title'.
+    When backend is provided, delegates to backend.list_notes().
+    Otherwise falls back to zk CLI for backward compatibility.
     """
     from datetime import date, timedelta
 
     if since and recent is not None:
-        raise ValueError("since and recent are exclusive — use one or the other, not both")
+        raise ValueError("since and recent are exclusive -- use one or the other, not both")
 
-    args = ["list", "--format", "{{path}}\t{{title}}\t{{format-date created '%Y-%m-%d'}}\t{{tags}}", "--limit", str(limit)]
-
-    if tag:
-        args += ["--tag", _reject_flag(tag, "tag")]
-    if since:
-        args += ["--modified-after", _reject_flag(since, "since")]
+    effective_since = since
     if recent is not None:
-        cutoff = (date.today() - timedelta(days=recent)).isoformat()
-        args += ["--modified-after", cutoff]
-    if until:
-        args += ["--modified-before", _reject_flag(until, "until")]
-    if sort:
-        args += ["--sort", _reject_flag(sort, "sort")]
-    if directory:
-        args += ["--", _reject_flag(directory, "directory")]
+        effective_since = (date.today() - timedelta(days=recent)).isoformat()
 
-    raw = run_zk(args, vault)
-    if not raw:
+    if backend:
+        entries = backend.list_notes(
+            directory=directory, tag=tag, limit=limit,
+            since=effective_since, until=until, sort=sort,
+        )
+    else:
+        # Legacy zk CLI fallback
+        from alaya.zk import run_zk, _reject_flag
+        args = ["list", "--format", "{{path}}\t{{title}}\t{{format-date created '%Y-%m-%d'}}\t{{tags}}", "--limit", str(limit)]
+        if tag:
+            args += ["--tag", _reject_flag(tag, "tag")]
+        if effective_since:
+            args += ["--modified-after", _reject_flag(effective_since, "since")]
+        if until:
+            args += ["--modified-before", _reject_flag(until, "until")]
+        if sort:
+            args += ["--sort", _reject_flag(sort, "sort")]
+        if directory:
+            args += ["--", _reject_flag(directory, "directory")]
+
+        raw = run_zk(args, vault)
+        if not raw:
+            return "No notes found."
+
+        from alaya.backend.protocol import NoteEntry
+        entries = []
+        for line in raw.splitlines():
+            parts = line.split("\t")
+            entries.append(NoteEntry(
+                path=parts[0] if len(parts) > 0 else "",
+                title=parts[1] if len(parts) > 1 else "",
+                date=parts[2] if len(parts) > 2 else "",
+                tags=parts[3] if len(parts) > 3 else "",
+            ))
+
+    if not entries:
         return "No notes found."
 
     rows = []
-    for line in raw.splitlines():
-        path, title, date_str, tags = _tsv(line, 4)
-        rows.append(f"| [[{title}]] | `{path}` | {date_str} | {tags} |")
+    for e in entries:
+        rows.append(f"| [[{e.title}]] | `{e.path}` | {e.date} | {e.tags} |")
 
     header = "| Title | Path | Date | Tags |\n|---|---|---|---|"
     return header + "\n" + "\n".join(rows)
 
 
-def get_backlinks(relative_path: str, vault: Path) -> str:
+def get_backlinks(relative_path: str, vault: Path, backend=None) -> str:
     """Return a Markdown list of notes that link to the given note."""
     resolve_note_path(relative_path, vault)  # validates path safety
-    try:
-        raw = run_zk(["list", "--link-to", relative_path, "--format", "{{path}}\t{{title}}"], vault)
-    except ZKError:
+
+    if backend:
+        entries = backend.get_backlinks(relative_path)
+    else:
+        from alaya.zk import run_zk, ZKError
+        try:
+            raw = run_zk(["list", "--link-to", relative_path, "--format", "{{path}}\t{{title}}"], vault)
+        except ZKError:
+            return "No backlinks found."
+        if not raw:
+            return "No backlinks found."
+        from alaya.backend.protocol import LinkEntry
+        entries = []
+        for line in raw.splitlines():
+            parts = line.split("\t")
+            path = parts[0] if len(parts) > 0 else ""
+            title = parts[1] if len(parts) > 1 else ""
+            entries.append(LinkEntry(path=path, title=title or path))
+
+    if not entries:
         return "No backlinks found."
 
-    if not raw:
-        return "No backlinks found."
-
-    lines = []
-    for line in raw.splitlines():
-        path, title = _tsv(line, 2)
-        lines.append(f"- [[{title or path}]] (`{path}`)")
-
+    lines = [f"- [[{e.title}]] (`{e.path}`)" for e in entries]
     return "\n".join(lines)
 
 
-def get_links(relative_path: str, vault: Path) -> str:
+def get_links(relative_path: str, vault: Path, backend=None) -> str:
     """Return a Markdown list of notes that the given note links to."""
     resolve_note_path(relative_path, vault)  # validates path safety
-    try:
-        raw = run_zk(["list", "--linked-by", relative_path, "--format", "{{path}}\t{{title}}"], vault)
-    except ZKError:
+
+    if backend:
+        entries = backend.get_outlinks(relative_path)
+    else:
+        from alaya.zk import run_zk, ZKError
+        try:
+            raw = run_zk(["list", "--linked-by", relative_path, "--format", "{{path}}\t{{title}}"], vault)
+        except ZKError:
+            return "No links found."
+        if not raw:
+            return "No links found."
+        from alaya.backend.protocol import LinkEntry
+        entries = []
+        for line in raw.splitlines():
+            parts = line.split("\t")
+            path = parts[0] if len(parts) > 0 else ""
+            title = parts[1] if len(parts) > 1 else ""
+            entries.append(LinkEntry(path=path, title=title or path))
+
+    if not entries:
         return "No links found."
 
-    if not raw:
-        return "No links found."
-
-    lines = []
-    for line in raw.splitlines():
-        path, title = _tsv(line, 2)
-        lines.append(f"- [[{title or path}]] (`{path}`)")
-
+    lines = [f"- [[{e.title}]] (`{e.path}`)" for e in entries]
     return "\n".join(lines)
 
 
-def get_tags(vault: Path) -> str:
+def get_tags(vault: Path, backend=None) -> str:
     """Return a Markdown table of all tags in the vault with counts."""
-    raw = run_zk(["tag", "list", "--format", "{{name}}\t{{note-count}}"], vault)
-    if not raw:
+    if backend:
+        entries = backend.list_tags()
+    else:
+        from alaya.zk import run_zk
+        raw = run_zk(["tag", "list", "--format", "{{name}}\t{{note-count}}"], vault)
+        if not raw:
+            return "No tags found."
+        from alaya.backend.protocol import TagEntry
+        entries = []
+        for line in raw.splitlines():
+            parts = line.split("\t")
+            name = parts[0] if len(parts) > 0 else ""
+            count = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+            entries.append(TagEntry(name=name, count=count))
+
+    if not entries:
         return "No tags found."
 
-    rows = []
-    for line in raw.splitlines():
-        name, count = _tsv(line, 2)
-        rows.append(f"| #{name} | {count or '0'} |")
-
+    rows = [f"| #{e.name} | {e.count} |" for e in entries]
     header = "| Tag | Notes |\n|---|---|"
     return header + "\n" + "\n".join(rows)
 
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
     @mcp.tool()
     def get_note_tool(path: str = "", title: str = "") -> str:
         """Read a note. Provide exactly one of path (relative path) or title (frontmatter title)."""
@@ -238,6 +282,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
                 until=until or None,
                 recent=recent or None,
                 sort=sort or None,
+                backend=backend,
             )
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
@@ -245,17 +290,17 @@ def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
     def get_backlinks_tool(path: str) -> str:
         """Return all notes that link to the given note (backlinks)."""
-        return get_backlinks(path, vault)
+        return get_backlinks(path, vault, backend=backend)
 
     @mcp.tool()
     def get_links_tool(path: str) -> str:
         """Return all notes that the given note links to (outgoing links)."""
-        return get_links(path, vault)
+        return get_links(path, vault, backend=backend)
 
     @mcp.tool()
     def get_tags_tool() -> str:
         """Return all tags in the vault with note counts."""
-        return get_tags(vault)
+        return get_tags(vault, backend=backend)
 
     @mcp.tool()
     def reindex_vault_tool(confirm: bool = False, force: bool = False) -> str:
@@ -264,4 +309,3 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         confirm=True required. force=True for a full rebuild.
         """
         return reindex_vault(vault, confirm=confirm, force=force)
-

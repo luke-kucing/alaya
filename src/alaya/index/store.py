@@ -447,8 +447,11 @@ _store_cache: dict[Path, VaultStore] = {}
 _store_lock = threading.Lock()
 
 
-def get_store(vault: Path) -> VaultStore:
+def get_store(vault: Path, data_dir: Path | None = None) -> VaultStore:
     """Return the VaultStore for a given vault root, creating it once per process.
+
+    data_dir overrides the default vectors path. When None, falls back to
+    .zk/vectors for backward compatibility.
 
     Uses double-checked locking so the common path (cache hit) avoids lock
     overhead while concurrent first-time calls still produce exactly one instance.
@@ -458,7 +461,8 @@ def get_store(vault: Path) -> VaultStore:
         return _store_cache[resolved]
     with _store_lock:
         if resolved not in _store_cache:
-            _store_cache[resolved] = VaultStore(db_path=resolved / ".zk" / "vectors")
+            vectors_path = data_dir if data_dir else resolved / ".zk" / "vectors"
+            _store_cache[resolved] = VaultStore(db_path=vectors_path)
         return _store_cache[resolved]
 
 

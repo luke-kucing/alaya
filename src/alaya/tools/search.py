@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.zk import run_zk, ZKError, _reject_flag
 
 logger = logging.getLogger(__name__)
 
@@ -137,11 +136,12 @@ def search_notes(
     rerank: bool = False,
     graph_expand: bool = False,
     hyde: bool = False,
+    backend=None,
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
 
     Uses adaptive query routing when an index is available; falls back to
-    zk keyword search otherwise.
+    backend keyword search otherwise.
     """
     if _hybrid_search_available(vault):
         results = _run_corrective_search(
@@ -159,7 +159,17 @@ def search_notes(
         header = "| Title | Path | Score |\n|---|---|---|"
         return header + "\n" + "\n".join(rows)
 
-    # fallback: zk keyword search
+    # Fallback: backend keyword search or zk CLI
+    if backend:
+        entries = backend.keyword_search(query, directory=directory, tags=tags, since=since, limit=limit)
+        if not entries:
+            return "No notes matching that query."
+        rows = [f"| [[{e.title}]] | `{e.path}` | {e.date} |" for e in entries]
+        header = "| Title | Path | Date |\n|---|---|---|"
+        return header + "\n" + "\n".join(rows)
+
+    # Legacy zk CLI fallback
+    from alaya.zk import run_zk, ZKError, _reject_flag
     args = [
         "list",
         "--match", query,
@@ -196,7 +206,7 @@ def search_notes(
 
 # --- FastMCP tool registration ---
 
-def _register(mcp: FastMCP, vault: Path) -> None:
+def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
     @mcp.tool()
     def search_notes_tool(
         query: str,
@@ -231,4 +241,5 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             rerank=rerank,
             graph_expand=graph_expand,
             hyde=hyde,
+            backend=backend,
         )

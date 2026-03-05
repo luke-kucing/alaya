@@ -23,7 +23,7 @@ class TestSearchNotesHybrid:
 
     def test_falls_back_to_zk_when_no_index(self, vault: Path) -> None:
         with patch("alaya.tools.search._hybrid_search_available", return_value=False), \
-             patch("alaya.tools.search.run_zk", return_value="resources/kubernetes-notes.md\tkubernetes-notes\t2026-02-01"):
+             patch("alaya.zk.run_zk", return_value="resources/kubernetes-notes.md\tkubernetes-notes\t2026-02-01"):
             result = search_notes("kubernetes", vault)
         assert "kubernetes-notes" in result
 

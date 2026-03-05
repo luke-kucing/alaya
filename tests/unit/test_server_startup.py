@@ -6,20 +6,35 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from alaya.server import _check_zk, _maybe_start_reembed
+from alaya.server import _maybe_start_reembed
+from alaya.backend.zk import ZkBackend
+from alaya.backend.protocol import VaultConfig, LinkResolution
 
 
-def test_check_zk_succeeds_when_installed():
+def test_zk_backend_check_available_succeeds():
+    config = VaultConfig(
+        root=Path("/tmp/test"),
+        vault_type="zk",
+        data_dir_name=".zk",
+        link_resolution=LinkResolution.TITLE,
+    )
+    backend = ZkBackend(config)
     mock_result = subprocess.CompletedProcess(args=["zk", "--version"], returncode=0, stdout="zk 0.14.0\n", stderr="")
     with patch("subprocess.run", return_value=mock_result):
-        _check_zk()  # should not raise
+        backend.check_available()  # should not raise
 
 
-def test_check_zk_exits_when_not_installed():
+def test_zk_backend_check_available_raises_when_not_installed():
+    config = VaultConfig(
+        root=Path("/tmp/test"),
+        vault_type="zk",
+        data_dir_name=".zk",
+        link_resolution=LinkResolution.TITLE,
+    )
+    backend = ZkBackend(config)
     with patch("subprocess.run", side_effect=FileNotFoundError):
-        with pytest.raises(SystemExit) as exc_info:
-            _check_zk()
-        assert exc_info.value.code == 1
+        with pytest.raises(RuntimeError, match="zk CLI not found"):
+            backend.check_available()
 
 
 def test_maybe_start_reembed_no_op_when_models_match(tmp_path: Path) -> None:

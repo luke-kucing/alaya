@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-from alaya.config import get_vault_root, ConfigError
+from alaya.backend.config import get_vault_root, ConfigError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     name="alaya",
     instructions=(
-        "You are connected to a zk-managed personal knowledge vault.\n\n"
+        "You are connected to a personal knowledge vault.\n\n"
         "CAPTURE RULES:\n"
         "- When the user shares a thought, observation, or experience, use smart_capture immediately.\n"
         "- NEVER paraphrase, summarize, or reword user input. Capture their exact words verbatim.\n"
@@ -32,27 +32,32 @@ mcp = FastMCP(
 # vault is resolved once here and closed over in each tool wrapper.
 from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, stats, graph, capture, enrich  # noqa: E402
 
-def _register_all(vault: Path) -> None:
-    read._register(mcp, vault)
+def _register_all(vault: Path, backend=None) -> None:
+    # Tools that accept a backend parameter
+    read._register(mcp, vault, backend=backend)
+    search._register(mcp, vault, backend=backend)
+    structure._register(mcp, vault, backend=backend)
+    edit._register(mcp, vault, backend=backend)
+    graph._register(mcp, vault, backend=backend)
+    capture._register(mcp, vault, backend=backend)
+    external._register(mcp, vault, backend=backend)
+
+    # Tools that don't need backend
     write._register(mcp, vault)
     inbox._register(mcp, vault)
-    search._register(mcp, vault)
-    structure._register(mcp, vault)
-    edit._register(mcp, vault)
     tasks._register(mcp, vault)
-    external._register(mcp, vault)
     ingest._register(mcp, vault)
     stats._register(mcp, vault)
-    graph._register(mcp, vault)
-    capture._register(mcp, vault)
     enrich._register(mcp, vault)
 
 
-def _instrument_tools(vault: Path) -> None:
+def _instrument_tools(vault: Path, backend=None) -> None:
     """Wrap all registered MCP tools with audit logging."""
     import asyncio
     import time
     from alaya.audit import log_tool_call
+
+    audit_path = backend.config.audit_log_path if backend else None
 
     tools = asyncio.get_event_loop().run_until_complete(mcp.list_tools())
     for tool in tools:
@@ -64,7 +69,7 @@ def _instrument_tools(vault: Path) -> None:
                 start = time.perf_counter()
                 result = _orig(*args, **kwargs)
                 elapsed = (time.perf_counter() - start) * 1000
-                log_tool_call(vault, _name, kwargs, str(result)[:200], elapsed)
+                log_tool_call(vault, _name, kwargs, str(result)[:200], elapsed, audit_path=audit_path)
                 return result
             return wrapper
 
@@ -156,16 +161,6 @@ def _register_health_tool(vault: Path) -> None:
         return "\n".join(lines)
 
 
-def _check_zk() -> None:
-    """Verify zk is installed and log its version. Exits with a clear message if not found."""
-    try:
-        result = subprocess.run(["zk", "--version"], capture_output=True, text=True, timeout=5)
-        logger.info("zk version: %s", result.stdout.strip())
-    except FileNotFoundError:
-        logger.error("zk CLI not found — install from: https://github.com/zk-org/zk")
-        raise SystemExit(1)
-
-
 def _maybe_start_reembed(vault_root, store) -> None:
     """Start background re-embed if the active embedding model differs from the index."""
     import threading
@@ -191,31 +186,38 @@ def _maybe_start_reembed(vault_root, store) -> None:
 
 
 def main() -> None:
-    _check_zk()
-
     try:
         vault_root = get_vault_root()
     except ConfigError as e:
         logger.error("Configuration error: %s", e)
         raise SystemExit(1)
 
-    logger.info("alaya starting — vault root: %s", vault_root)
+    # Detect backend and verify prerequisites
+    from alaya.backend.config import get_backend
+    try:
+        backend = get_backend(vault_root)
+        backend.check_available()
+    except (ConfigError, RuntimeError) as e:
+        logger.error("Backend error: %s", e)
+        raise SystemExit(1)
 
-    _register_all(vault_root)
+    logger.info("alaya starting -- vault root: %s (backend: %s)", vault_root, backend.config.vault_type)
+
+    _register_all(vault_root, backend=backend)
     _register_health_tool(vault_root)
-    _instrument_tools(vault_root)
+    _instrument_tools(vault_root, backend=backend)
 
     from alaya.index.store import get_store, get_index_model
     from alaya.index.models import get_active_model
     from alaya.watcher import start_watcher
 
-    store = get_store(vault_root)
+    store = get_store(vault_root, data_dir=backend.config.vectors_dir)
     # Force table init now so schema-mismatch reindex starts before serving requests
     store._get_table()
     if store.take_needs_reindex():
         import threading
         from alaya.index.reindex import reindex_all
-        logger.warning("Schema mismatch detected — starting background full reindex")
+        logger.warning("Schema mismatch detected -- starting background full reindex")
         threading.Thread(
             target=reindex_all, args=(vault_root, store), daemon=True, name="alaya-schema-reindex"
         ).start()
