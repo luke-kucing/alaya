@@ -54,7 +54,7 @@ The server communicates over stdio (MCP protocol) — it's designed to be launch
 ### Running tests
 
 ```bash
-make test                # unit tests (574 tests, no external deps)
+make test                # unit tests (607+ tests, no external deps)
 make test-integration    # integration tests (requires zk binary)
 make lint                # ruff check
 ```
@@ -102,11 +102,12 @@ make lint                # ruff check
 │  │  vault.py (path safety)    zk.py (CLI wrapper)  │  │
 │  │  config.py (env vars)      watcher.py (watchdog)│  │
 │  │  events.py (pub/sub)       audit.py (JSONL log) │  │
+│  │  cache.py  (metadata cache, O(1) lookups)       │  │
 │  └──────────────────┬──────────────────────────────┘  │
 │                     │                                  │
 │  ┌──────────────────▼──────────────────────────────┐  │
 │  │              index/          providers/          │  │
-│  │  embedder.py (nomic ONNX)    gitlab.py (glab)   │  │
+│  │  embedder.py (nomic ONNX+LRU)gitlab.py (glab)   │  │
 │  │  store.py    (LanceDB)       github.py (gh)     │  │
 │  │  router.py   (query class.)                     │  │
 │  │  corrective.py (retry RAG)                      │  │
@@ -267,7 +268,7 @@ External issue CRUD (list, close, update) is handled by Claude Code natively via
 
 ### Write-through indexing
 
-All write operations (create, append, edit, move, rename, delete) emit events that trigger immediate index updates. The file watcher catches external edits with 2-second debounce. Double-indexing is prevented via coordination between the event system and watcher.
+All write operations (create, append, edit, move, rename, delete) emit events that trigger immediate index updates. The file watcher catches external edits with 2-second debounce. Double-indexing is prevented via coordination between the event system and watcher. A `VaultMetadataCache` keeps frontmatter, tags, and wikilinks in memory for O(1) lookups — automatically invalidated by both the event system and file watcher.
 
 ### Audit logging
 
@@ -379,7 +380,7 @@ Configure any combination of providers. `pull_external` and `push_external` auto
 
 ```bash
 make install          # install dependencies
-make test             # run unit tests (574 tests)
+make test             # run unit tests (607+ tests)
 make test-unit        # run unit tests verbose
 make test-integration # run integration tests (requires zk binary)
 make lint             # ruff check
@@ -393,9 +394,10 @@ src/alaya/
 ├── server.py           # FastMCP server, tool registration, audit wrapping
 ├── config.py           # env var loading, vault validation
 ├── vault.py            # path safety, frontmatter parsing
+├── cache.py            # VaultMetadataCache: in-memory metadata index, O(1) lookups
 ├── zk.py               # zk CLI subprocess wrapper
 ├── events.py           # pub/sub event bus for write-through indexing
-├── watcher.py          # watchdog file system monitor
+├── watcher.py          # watchdog file system monitor + cache invalidation
 ├── errors.py           # structured error codes
 ├── audit.py            # JSONL tool call logging
 ├── backend/
@@ -415,18 +417,20 @@ src/alaya/
 │   ├── external.py     # pull_external, push_external
 │   ├── ingest.py       # URL/PDF/markdown ingestion
 │   ├── stats.py        # vault_stats
-│   └── graph.py        # vault_graph (wikilink topology)
+│   ├── graph.py        # vault_graph (wikilink topology)
+│   └── enrich.py       # LLM-powered enrichment (person cache, suggestions)
 ├── providers/
 │   ├── gitlab.py       # glab CLI wrapper
 │   └── github.py       # gh CLI wrapper
 └── index/
-    ├── embedder.py     # chunk notes, embed via nomic ONNX
+    ├── embedder.py     # chunk notes, embed via nomic ONNX (LRU-cached queries)
     ├── store.py        # LanceDB: upsert, delete, hybrid/keyword/vector search
     ├── router.py       # adaptive query classification
     ├── corrective.py   # retrieval quality check + query reformulation
-    ├── graph_rag.py    # wikilink-based search expansion
+    ├── graph_rag.py    # wikilink-based search expansion (cache-aware)
     ├── hyde.py         # hypothetical document embeddings
     ├── contextual.py   # chunk context prepending
+    ├── late_chunking.py # full-doc embedding with per-chunk pooling
     ├── chunking.py     # pluggable chunking strategies
     ├── models.py       # embedding model registry
     ├── reindex.py      # full/incremental rebuild
@@ -447,4 +451,4 @@ src/alaya/
 
 ## Status
 
-All 5 milestones implemented plus advanced RAG pipeline and pluggable vault backend (zk + Obsidian). 574 unit tests passing. See [open issues](https://github.com/luke-kucing/alaya/issues) for planned improvements.
+All 5 milestones implemented plus advanced RAG pipeline, pluggable vault backend (zk + Obsidian), and in-memory metadata cache. 607+ unit tests passing. See [open issues](https://github.com/luke-kucing/alaya/issues) for planned improvements.
