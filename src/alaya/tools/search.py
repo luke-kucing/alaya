@@ -56,6 +56,45 @@ def _run_routed_search(
     )
 
 
+def _run_corrective_search(
+    query: str,
+    vault: Path,
+    directory: str | None = None,
+    tags: list[str] | None = None,
+    since: str | None = None,
+    limit: int = 20,
+    rerank: bool = False,
+) -> list[dict]:
+    """Search with corrective RAG: retry with reformulated queries if results are poor."""
+    from alaya.index.corrective import needs_correction, filter_relevant, reformulate_query
+
+    results = _run_routed_search(
+        query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
+    )
+
+    # Filter out irrelevant results
+    results = filter_relevant(results)
+
+    # If results are good enough, return them
+    if not needs_correction(results):
+        return results
+
+    # Try reformulated queries
+    for alt_query in reformulate_query(query):
+        logger.debug("Corrective RAG retry with: %r", alt_query)
+        alt_results = _run_routed_search(
+            alt_query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
+        )
+        alt_results = filter_relevant(alt_results)
+        if not needs_correction(alt_results):
+            return alt_results
+        # Merge: keep the best results seen so far
+        if alt_results and (not results or alt_results[0]["score"] > results[0]["score"]):
+            results = alt_results
+
+    return results
+
+
 def _run_hybrid_search(
     query: str,
     vault: Path,
@@ -96,7 +135,7 @@ def search_notes(
     zk keyword search otherwise.
     """
     if _hybrid_search_available(vault):
-        results = _run_routed_search(
+        results = _run_corrective_search(
             query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
         )
         if not results:
