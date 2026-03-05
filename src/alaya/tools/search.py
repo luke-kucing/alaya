@@ -1,8 +1,11 @@
-"""Search tools: search_notes (M1: zk keyword fallback; M3: LanceDB hybrid)."""
+"""Search tools: search_notes with adaptive query routing."""
+import logging
 from pathlib import Path
 
 from fastmcp import FastMCP
 from alaya.zk import run_zk, ZKError, _reject_flag
+
+logger = logging.getLogger(__name__)
 
 
 def _hybrid_search_available(vault: Path) -> bool:
@@ -15,6 +18,44 @@ def _hybrid_search_available(vault: Path) -> bool:
         return False
 
 
+def _run_routed_search(
+    query: str,
+    vault: Path,
+    directory: str | None = None,
+    tags: list[str] | None = None,
+    since: str | None = None,
+    limit: int = 20,
+    rerank: bool = False,
+) -> list[dict]:
+    """Route the query to the best search strategy, then execute."""
+    from alaya.index.router import classify_query, QueryStrategy
+    from alaya.index.embedder import embed_query
+    from alaya.index.store import get_store, hybrid_search, keyword_search
+
+    routed = classify_query(query)
+    logger.debug("Query routed: strategy=%s query=%r since=%s", routed.strategy.name, routed.query, routed.since)
+
+    # Merge router-extracted date filter with explicit since parameter
+    effective_since = since or routed.since
+    store = get_store(vault)
+
+    if routed.strategy == QueryStrategy.KEYWORD:
+        results = keyword_search(
+            routed.query, store,
+            directory=directory, tags=tags, since=effective_since, limit=limit,
+        )
+        # Fall through to hybrid if keyword search returns nothing
+        if results:
+            return results
+
+    # For SEMANTIC, HYBRID, TEMPORAL, or KEYWORD fallthrough: use hybrid search
+    query_embedding = embed_query(routed.query)
+    return hybrid_search(
+        routed.query, query_embedding, store,
+        directory=directory, tags=tags, since=effective_since, limit=limit, rerank=rerank,
+    )
+
+
 def _run_hybrid_search(
     query: str,
     vault: Path,
@@ -24,7 +65,11 @@ def _run_hybrid_search(
     limit: int = 20,
     rerank: bool = False,
 ) -> list[dict]:
-    """Embed the query and run hybrid search against LanceDB."""
+    """Embed the query and run hybrid search against LanceDB.
+
+    This is the non-routed path, used by callers that bypass routing
+    (e.g., smart_capture's _find_matching_note).
+    """
     from alaya.index.embedder import embed_query
     from alaya.index.store import get_store, hybrid_search
 
@@ -47,11 +92,11 @@ def search_notes(
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
 
-    Uses LanceDB hybrid search when an index is available; falls back to
+    Uses adaptive query routing when an index is available; falls back to
     zk keyword search otherwise.
     """
     if _hybrid_search_available(vault):
-        results = _run_hybrid_search(
+        results = _run_routed_search(
             query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
         )
         if not results:
@@ -112,6 +157,12 @@ def _register(mcp: FastMCP, vault: Path) -> None:
     ) -> str:
         """Search notes by keyword or semantic query. Filter by directory, tags, or since date.
 
+        Automatically routes queries to the best strategy:
+        - Short exact terms use keyword (BM25) search
+        - Questions use semantic (vector) search
+        - Time-referenced queries extract date filters automatically
+        - Mixed queries use full hybrid (vector + BM25 + RRF)
+
         Set rerank=True for higher precision (uses cross-encoder, adds latency).
         """
         return search_notes(
@@ -123,4 +174,3 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             limit=limit,
             rerank=rerank,
         )
-
