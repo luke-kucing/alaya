@@ -16,7 +16,7 @@ class TestSearchNotesHybrid:
              "directory": "resources", "score": 0.92},
         ]
         with patch("alaya.tools.search._hybrid_search_available", return_value=True), \
-             patch("alaya.tools.search._run_routed_search", return_value=mock_results):
+             patch("alaya.tools.search._run_corrective_search", return_value=mock_results):
             result = search_notes("kubernetes", vault)
         assert "kubernetes-notes" in result
         assert "0.9" in result  # relevance score
@@ -33,7 +33,7 @@ class TestSearchNotesHybrid:
              "directory": "resources", "score": 0.87},
         ]
         with patch("alaya.tools.search._hybrid_search_available", return_value=True), \
-             patch("alaya.tools.search._run_routed_search", return_value=mock_results):
+             patch("alaya.tools.search._run_corrective_search", return_value=mock_results):
             result = search_notes("kubernetes", vault)
         assert "0.87" in result
 

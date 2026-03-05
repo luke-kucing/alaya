@@ -26,6 +26,7 @@ def _run_routed_search(
     since: str | None = None,
     limit: int = 20,
     rerank: bool = False,
+    hyde: bool = False,
 ) -> list[dict]:
     """Route the query to the best search strategy, then execute."""
     from alaya.index.router import classify_query, QueryStrategy
@@ -49,11 +50,56 @@ def _run_routed_search(
             return results
 
     # For SEMANTIC, HYBRID, TEMPORAL, or KEYWORD fallthrough: use hybrid search
-    query_embedding = embed_query(routed.query)
+    if hyde and routed.strategy == QueryStrategy.SEMANTIC:
+        from alaya.index.hyde import embed_with_hyde
+        query_embedding = embed_with_hyde(routed.query)
+    else:
+        query_embedding = embed_query(routed.query)
+
     return hybrid_search(
         routed.query, query_embedding, store,
         directory=directory, tags=tags, since=effective_since, limit=limit, rerank=rerank,
     )
+
+
+def _run_corrective_search(
+    query: str,
+    vault: Path,
+    directory: str | None = None,
+    tags: list[str] | None = None,
+    since: str | None = None,
+    limit: int = 20,
+    rerank: bool = False,
+    hyde: bool = False,
+) -> list[dict]:
+    """Search with corrective RAG: retry with reformulated queries if results are poor."""
+    from alaya.index.corrective import needs_correction, filter_relevant, reformulate_query
+
+    results = _run_routed_search(
+        query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
+    )
+
+    # Filter out irrelevant results
+    results = filter_relevant(results)
+
+    # If results are good enough, return them
+    if not needs_correction(results):
+        return results
+
+    # Try reformulated queries
+    for alt_query in reformulate_query(query):
+        logger.debug("Corrective RAG retry with: %r", alt_query)
+        alt_results = _run_routed_search(
+            alt_query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
+        )
+        alt_results = filter_relevant(alt_results)
+        if not needs_correction(alt_results):
+            return alt_results
+        # Merge: keep the best results seen so far
+        if alt_results and (not results or alt_results[0]["score"] > results[0]["score"]):
+            results = alt_results
+
+    return results
 
 
 def _run_hybrid_search(
@@ -89,6 +135,8 @@ def search_notes(
     since: str | None = None,
     limit: int = 20,
     rerank: bool = False,
+    graph_expand: bool = False,
+    hyde: bool = False,
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
 
@@ -96,9 +144,12 @@ def search_notes(
     zk keyword search otherwise.
     """
     if _hybrid_search_available(vault):
-        results = _run_routed_search(
-            query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
+        results = _run_corrective_search(
+            query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
         )
+        if graph_expand and results:
+            from alaya.index.graph_rag import expand_with_graph
+            results = expand_with_graph(results, vault)[:limit]
         if not results:
             return "No notes matching that query."
         rows = [
@@ -154,6 +205,8 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         since: str = "",
         limit: int = 20,
         rerank: bool = False,
+        graph_expand: bool = False,
+        hyde: bool = False,
     ) -> str:
         """Search notes by keyword or semantic query. Filter by directory, tags, or since date.
 
@@ -164,6 +217,9 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         - Mixed queries use full hybrid (vector + BM25 + RRF)
 
         Set rerank=True for higher precision (uses cross-encoder, adds latency).
+        Set graph_expand=True to include wikilink-connected notes in results.
+        Set hyde=True for semantic queries to embed a hypothetical answer
+        instead of the raw query (bridges vocabulary gaps).
         """
         return search_notes(
             query,
@@ -173,4 +229,6 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             since=since or None,
             limit=limit,
             rerank=rerank,
+            graph_expand=graph_expand,
+            hyde=hyde,
         )
