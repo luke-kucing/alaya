@@ -1,7 +1,7 @@
 [project]
 name = "alaya"
 version = "0.1.0"
-description = "A second brain — FastMCP server for a zk-managed personal knowledge vault"
+description = "A second brain -- FastMCP server for personal knowledge vaults (zk and Obsidian)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -37,6 +37,9 @@ testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (require real zk binary and vault)",
 ]
+
+[project.scripts]
+alaya = "alaya.server:main"
 
 [build-system]
 requires = ["hatchling"]

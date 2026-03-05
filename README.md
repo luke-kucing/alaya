@@ -2,32 +2,42 @@
 
 > **ālaya** (ālayavijñāna) — storehouse consciousness. The layer of mind that holds all impressions, memories, and seeds of knowledge.
 
-A FastMCP server that makes Claude Code the primary interface for a `zk`-managed personal knowledge vault. Full read/write/search/synthesis access — the AI is the interface, the vault is the source of truth.
+A FastMCP server that makes Claude Code the primary interface for a personal knowledge vault (zk or Obsidian). Full read/write/search/synthesis access — the AI is the interface, the vault is the source of truth.
 
 ## Quickstart
 
 ```bash
-# 1. Install prerequisites
-brew install zk uv
+# 1. Register with Claude Code (one command, no clone needed)
+claude mcp add alaya -e ALAYA_VAULT_DIR=$HOME/notes -- uvx alaya
 
-# 2. Clone and install
-git clone git@github.com:luke-kucing/alaya.git
-cd alaya
-uv sync
-
-# 3. Initialize your vault (skip if you already have one)
-mkdir -p ~/notes && cd ~/notes && zk init && cd -
-
-# 4. Register with Claude Code
-claude mcp add alaya \
-  -e ZK_NOTEBOOK_DIR=$HOME/notes \
-  -- uv run --directory $(pwd) python -m alaya.server
-
-# 5. Start Claude Code — alaya connects automatically
+# 2. Start Claude Code — alaya connects automatically
 claude
 ```
 
 That's it. Ask Claude to "search my notes for X" or "create a note about Y" and it works.
+
+### Vault setup
+
+**zk vault** (requires [zk](https://github.com/zk-org/zk) CLI):
+
+```bash
+brew install zk
+mkdir -p ~/notes && cd ~/notes && zk init
+```
+
+**Obsidian vault** — just point `ALAYA_VAULT_DIR` at any directory with a `.obsidian/` folder. No extra tools needed.
+
+### Running from source
+
+```bash
+git clone git@github.com:luke-kucing/alaya.git
+cd alaya && uv sync
+
+# Register with Claude Code from source
+claude mcp add alaya \
+  -e ALAYA_VAULT_DIR=$HOME/notes \
+  -- uv run --directory $(pwd) alaya
+```
 
 ### Running the server standalone
 
@@ -36,10 +46,7 @@ That's it. Ask Claude to "search my notes for X" or "create a note about Y" and 
 make serve
 
 # Or directly with env var
-ZK_NOTEBOOK_DIR=~/notes uv run python -m alaya.server
-
-# Or with .env file loaded
-export $(cat .env | xargs) && uv run python -m alaya.server
+ALAYA_VAULT_DIR=~/notes uv run alaya
 ```
 
 The server communicates over stdio (MCP protocol) — it's designed to be launched by Claude Code, not run in a browser.
@@ -47,7 +54,7 @@ The server communicates over stdio (MCP protocol) — it's designed to be launch
 ### Running tests
 
 ```bash
-make test                # unit tests (464 tests, no external deps)
+make test                # unit tests (574 tests, no external deps)
 make test-integration    # integration tests (requires zk binary)
 make lint                # ruff check
 ```
@@ -57,7 +64,7 @@ make lint                # ruff check
 - **The AI is the interface.** Stay in one place — a Claude Code session — and converse. Claude reads, writes, searches, and reasons across the vault.
 - **Frictionless capture, deliberate structure.** Inbox capture is a single sentence. Processing, linking, and filing are separate structured acts.
 - **Propose, then act.** Destructive or structural changes follow a confirmation flow. Appends and captures are always safe.
-- **zk is the engine.** All note storage and graph operations delegate to the `zk` CLI. The vault stays portable.
+- **Pluggable vault backend.** `ZkBackend` delegates to the `zk` CLI; `ObsidianBackend` is pure Python. The vault stays portable either way.
 - **Semantic retrieval over keyword search.** LanceDB hybrid search finds notes by meaning, not just exact words.
 
 ## Architecture
@@ -82,12 +89,21 @@ make lint                # ruff check
 │  └──────┬──────┘ └──────┬──────┘ └───────┬────────┘  │
 │         │               │                │            │
 │  ┌──────▼───────────────▼────────────────▼─────────┐  │
-│  │                 Shared layer                     │  │
+│  │              backend/ (VaultBackend protocol)    │  │
+│  │  ┌──────────────────┐  ┌──────────────────────┐  │  │
+│  │  │ ZkBackend        │  │ ObsidianBackend      │  │  │
+│  │  │ (delegates to zk │  │ (pure Python,        │  │  │
+│  │  │  CLI subprocess) │  │  no external deps)   │  │  │
+│  │  └──────────────────┘  └──────────────────────┘  │  │
+│  └──────────────────┬──────────────────────────────┘  │
+│                     │                                  │
+│  ┌──────────────────▼──────────────────────────────┐  │
+│  │  Shared layer                                    │  │
 │  │  vault.py (path safety)    zk.py (CLI wrapper)  │  │
 │  │  config.py (env vars)      watcher.py (watchdog)│  │
 │  │  events.py (pub/sub)       audit.py (JSONL log) │  │
 │  └──────────────────┬──────────────────────────────┘  │
-│                     │                                 │
+│                     │                                  │
 │  ┌──────────────────▼──────────────────────────────┐  │
 │  │              index/          providers/          │  │
 │  │  embedder.py (nomic ONNX)    gitlab.py (glab)   │  │
@@ -108,22 +124,22 @@ make lint                # ruff check
     │  tags)   │    └──────────────────────────────────┘
     └────┬─────┘
          │
-    ┌────▼──────────────────────┐
-    │  ~/notes (vault)          │
-    │  ├── daily/               │
-    │  ├── inbox.md             │
-    │  ├── projects/            │
-    │  ├── areas/               │
-    │  ├── people/              │
-    │  ├── ideas/               │
-    │  ├── learning/            │
-    │  ├── resources/           │
-    │  ├── raw/                 │
-    │  ├── archives/            │
-    │  └── .zk/                 │
-    │      ├── vectors/ (lance) │
-    │      └── audit.jsonl      │
-    └───────────────────────────┘
+    ┌────▼──────────────────────────────┐
+    │  ~/notes (vault)                  │
+    │  ├── daily/                       │
+    │  ├── inbox.md                     │
+    │  ├── projects/                    │
+    │  ├── areas/                       │
+    │  ├── people/                      │
+    │  ├── ideas/                       │
+    │  ├── learning/                    │
+    │  ├── resources/                   │
+    │  ├── raw/                         │
+    │  ├── archives/                    │
+    │  └── .zk/ or .obsidian/           │
+    │      ├── vectors/ (lance)         │
+    │      └── audit.jsonl              │
+    └───────────────────────────────────┘
 ```
 
 ## Search Pipeline
@@ -162,9 +178,9 @@ Query ──▶ Router ──▶ Retrieval ──▶ Correction ──▶ Expans
 
 **Plain functions, not classes.** Tools are `async def get_note(path, vault) -> str` — no inheritance, no base classes. State is passed explicitly. A `Chunk` dataclass is the only data container.
 
-**zk CLI as the seam.** All shell calls go through `run_zk()`. Unit tests mock at this boundary. Integration tests use the real binary.
+**VaultBackend as the seam.** Tools call `backend.list_notes()`, `backend.search()`, etc. `ZkBackend` delegates to the `zk` CLI via `run_zk()`; `ObsidianBackend` is pure Python. Unit tests mock `alaya.zk.run_zk` for zk paths, or use real filesystem fixtures for Obsidian paths. Wiring tests prove each tool dispatches through the backend.
 
-**LanceDB is additive.** Core tools work without any index. Search falls back to `zk list --match`. The vector index is an optimization layer, not a requirement.
+**LanceDB is additive.** Core tools work without any index. Search falls back to backend keyword search. The vector index is an optimization layer, not a requirement.
 
 **Tools return Markdown strings.** Claude reads Markdown; it doesn't parse JSON. Tables, bullet lists, and metadata headers are formatted for Claude consumption.
 
@@ -255,7 +271,7 @@ All write operations (create, append, edit, move, rename, delete) emit events th
 
 ### Audit logging
 
-Every tool call is logged to `.zk/audit.jsonl` with timestamp, tool name, arguments, status, duration, and result summary. The TUI dashboard tails this file for real-time activity monitoring.
+Every tool call is logged to `audit.jsonl` in the vault data directory (`.zk/` or `.obsidian/`) with timestamp, tool name, arguments, status, duration, and result summary. The TUI dashboard tails this file for real-time activity monitoring.
 
 ## Vault structure
 
@@ -273,7 +289,7 @@ Every tool call is logged to `.zk/audit.jsonl` with timestamp, tool name, argume
 └── archives/    # completed or dead things (soft-delete target)
 ```
 
-Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links are wikilinks (`[[title]]`).
+Directory names are configurable via `alaya.toml` (see Configuration below). Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links are wikilinks (`[[title]]`).
 
 ## Stack
 
@@ -282,7 +298,7 @@ Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links 
 | Language | Python 3.12+ |
 | Package manager | uv |
 | MCP framework | FastMCP |
-| Note engine | zk CLI |
+| Vault backend | zk CLI or Obsidian (pure Python) |
 | Vector store | LanceDB (local, Apache Arrow) |
 | Embeddings | nomic-embed-text-v1.5 (ONNX, no PyTorch) |
 | Search | Hybrid vector + BM25 via LanceDB with RRF reranking |
@@ -299,7 +315,7 @@ Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links 
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) — `brew install uv`
-- [zk](https://github.com/zk-org/zk) — `brew install zk`
+- [zk](https://github.com/zk-org/zk) — `brew install zk` (optional, only needed for zk vaults)
 - [glab](https://gitlab.com/gitlab-org/cli) — `brew install glab` (optional, for GitLab bridge)
 - [gh](https://cli.github.com/) — `brew install gh` (optional, for GitHub bridge)
 
@@ -307,7 +323,8 @@ Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links 
 
 | Variable | Required | Description |
 |---|---|---|
-| `ZK_NOTEBOOK_DIR` | Yes | Path to your zk vault (e.g. `~/notes`) |
+| `ALAYA_VAULT_DIR` | Yes | Path to your vault (e.g. `~/notes`) |
+| `ZK_NOTEBOOK_DIR` | Compat | Backward-compatible alias for `ALAYA_VAULT_DIR` |
 | `ALAYA_EMBEDDING_MODEL` | No | Embedding model variant (`nomic-v1.5` or `nomic-v1.5-q4`, default: `nomic-v1.5`) |
 | `GITLAB_PROJECT` | No | GitLab project path — enables GitLab provider |
 | `GITLAB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
@@ -315,6 +332,30 @@ Notes use minimal YAML frontmatter (`title` + `date`) and inline `#tags`. Links 
 | `GITHUB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
 | `OUTLINE_URL` | No | Outline instance URL — enables Outline provider |
 | `OUTLINE_API_KEY` | No | Outline API key |
+
+### `alaya.toml` (optional)
+
+Place an `alaya.toml` in your vault root to override defaults:
+
+```toml
+[vault]
+type = "obsidian"  # or "zk" — overrides auto-detection
+
+[directories]
+person = "people"
+idea = "ideas"
+project = "projects"
+learning = "learning"
+resource = "resources"
+daily = "daily"
+
+[settings]
+archives_dir = "archives"
+default_capture_dir = "inbox"
+default_external_dir = "external"
+```
+
+All fields are optional. Without this file, alaya auto-detects the backend from `.zk/` or `.obsidian/` and uses sensible defaults.
 
 ### Optional dependencies
 
@@ -327,9 +368,9 @@ Pass additional env vars when registering with Claude Code using `-e`:
 
 ```bash
 claude mcp add alaya \
-  -e ZK_NOTEBOOK_DIR=$HOME/notes \
+  -e ALAYA_VAULT_DIR=$HOME/notes \
   -e GITHUB_REPO=owner/repo \
-  -- uv run --directory /path/to/alaya python -m alaya.server
+  -- uvx alaya
 ```
 
 Configure any combination of providers. `pull_external` and `push_external` auto-detect the provider from URLs or use the configured defaults.
@@ -338,7 +379,7 @@ Configure any combination of providers. `pull_external` and `push_external` auto
 
 ```bash
 make install          # install dependencies
-make test             # run unit tests (464 tests)
+make test             # run unit tests (574 tests)
 make test-unit        # run unit tests verbose
 make test-integration # run integration tests (requires zk binary)
 make lint             # ruff check
@@ -357,6 +398,11 @@ src/alaya/
 ├── watcher.py          # watchdog file system monitor
 ├── errors.py           # structured error codes
 ├── audit.py            # JSONL tool call logging
+├── backend/
+│   ├── protocol.py     # VaultBackend protocol + VaultConfig
+│   ├── config.py       # vault type detection, alaya.toml loading
+│   ├── zk.py           # ZkBackend (delegates to zk CLI)
+│   └── obsidian.py     # ObsidianBackend (pure Python)
 ├── tools/
 │   ├── read.py         # get_note, list_notes, backlinks, links, tags, reindex
 │   ├── write.py        # create_note, append_to_note, update_tags
@@ -389,7 +435,8 @@ src/alaya/
 
 ### Testing approach
 
-- **Unit tests** mock `run_zk` and the embedding model at the boundary. No subprocess calls, no model loading.
+- **Unit tests** mock `alaya.zk.run_zk` (the subprocess boundary) and the embedding model. No subprocess calls, no model loading. Obsidian tests use real filesystem fixtures.
+- **Wiring tests** prove each tool dispatches through the backend by patching `run_zk` with `AssertionError` side effects.
 - **Integration tests** use the real `zk` binary and LanceDB against `vault_fixture/`.
 - Tests use a copy of `vault_fixture/` in a temp directory — vault is never modified in place.
 - TDD: failing tests written before implementation for every tool.
@@ -400,4 +447,4 @@ src/alaya/
 
 ## Status
 
-All 5 milestones implemented plus advanced RAG pipeline. 464 unit tests passing. See [open issues](https://github.com/luke-kucing/alaya/issues) for planned improvements.
+All 5 milestones implemented plus advanced RAG pipeline and pluggable vault backend (zk + Obsidian). 574 unit tests passing. See [open issues](https://github.com/luke-kucing/alaya/issues) for planned improvements.
