@@ -128,6 +128,7 @@ def search_notes(
     since: str | None = None,
     limit: int = 20,
     rerank: bool = False,
+    graph_expand: bool = False,
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
 
@@ -138,6 +139,9 @@ def search_notes(
         results = _run_corrective_search(
             query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
         )
+        if graph_expand and results:
+            from alaya.index.graph_rag import expand_with_graph
+            results = expand_with_graph(results, vault)[:limit]
         if not results:
             return "No notes matching that query."
         rows = [
@@ -193,6 +197,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         since: str = "",
         limit: int = 20,
         rerank: bool = False,
+        graph_expand: bool = False,
     ) -> str:
         """Search notes by keyword or semantic query. Filter by directory, tags, or since date.
 
@@ -203,6 +208,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         - Mixed queries use full hybrid (vector + BM25 + RRF)
 
         Set rerank=True for higher precision (uses cross-encoder, adds latency).
+        Set graph_expand=True to include wikilink-connected notes in results.
         """
         return search_notes(
             query,
@@ -212,4 +218,5 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             since=since or None,
             limit=limit,
             rerank=rerank,
+            graph_expand=graph_expand,
         )
