@@ -25,4 +25,4 @@ lint: ## Lint source and tests
 	uv run ruff check src/ tests/
 
 serve: ## Start the server
-	uv run python -m alaya.server
+	uv run alaya
