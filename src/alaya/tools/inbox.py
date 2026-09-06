@@ -3,8 +3,9 @@ from datetime import datetime
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.errors import error, NOT_FOUND
+from alaya.errors import error, NOT_FOUND, INVALID_ARGUMENT
 from alaya.tools._locks import get_path_lock, atomic_write
+from alaya.confirm import ConfirmError, guard
 
 _INBOX_FILENAME = "inbox.md"
 
@@ -78,6 +79,29 @@ def clear_inbox_item(text: str, vault: Path) -> None:
     raise ValueError(f"Inbox item not found: '{text}'")
 
 
+def preview_clear_inbox_item(text: str, vault: Path) -> str:
+    """Show the exact inbox line that would be removed."""
+    import re
+
+    inbox = _inbox_path(vault)
+    if not inbox.exists():
+        raise ValueError(f"Inbox item not found: '{text}'")
+
+    ts_prefix = re.compile(r"^-\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+")
+    lines = inbox.read_text().splitlines()
+
+    for line in lines:
+        if ts_prefix.sub("", line.rstrip()) == text:
+            return f"Remove this inbox line (exact match):\n\n    {line.rstrip()}"
+    for line in lines:
+        if text in line:
+            return (
+                "Remove this inbox line (substring match — check it is the one you meant):\n\n"
+                f"    {line.rstrip()}"
+            )
+    raise ValueError(f"Inbox item not found: '{text}'")
+
+
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path) -> None:
@@ -92,11 +116,23 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         return get_inbox(vault)
 
     @mcp.tool()
-    def clear_inbox_item_tool(text: str) -> str:
-        """Remove an inbox item by matching text."""
+    def clear_inbox_item_tool(text: str, confirm_token: str = "") -> str:
+        """Remove an inbox item by matching text.
+
+        Call without confirm_token to see the exact line that would be removed
+        and receive a token, then call again with the token to execute.
+        """
         try:
+            proposal = guard(
+                "clear_inbox_item_tool", {"text": text}, confirm_token,
+                lambda: preview_clear_inbox_item(text, vault),
+            )
+            if proposal:
+                return proposal
             clear_inbox_item(text, vault)
             return f"Removed inbox item: '{text}'"
+        except ConfirmError as e:
+            return error(INVALID_ARGUMENT, str(e))
         except ValueError as e:
             return error(NOT_FOUND, str(e))
 

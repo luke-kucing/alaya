@@ -27,11 +27,15 @@ def log_tool_call(
     result_summary: str,
     duration_ms: float,
     audit_path: Path | None = None,
+    confirm_id: str | None = None,
 ) -> None:
     """Append a structured entry to the audit log.
 
     audit_path overrides the default location. When None, falls back to
     .zk/audit.jsonl for backward compatibility.
+
+    confirm_id pairs the two halves of a two-phase confirmation: the propose
+    call and the execute call that follows carry the same id.
     """
     status = "error" if result_summary.startswith("ERROR") else "ok"
 
@@ -43,6 +47,9 @@ def log_tool_call(
         "duration_ms": round(duration_ms, 1),
         "summary": result_summary[:_MAX_ARG_LEN],
     }
+
+    if confirm_id:
+        entry["confirm_id"] = confirm_id
 
     if audit_path is None:
         audit_dir = vault / ".zk"

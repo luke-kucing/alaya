@@ -12,6 +12,7 @@ from alaya.events import emit, NoteEvent, EventType
 from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md, parse_note
 from alaya.tools.write import _validate_directory, _slugify
 from alaya.tools._locks import get_path_lock, atomic_write
+from alaya.confirm import ConfirmError, guard
 
 _DEFAULT_ARCHIVES_DIR = "archives"
 
@@ -188,16 +189,113 @@ def delete_note(relative_path: str, vault: Path, reason: str | None = None, arch
     return archive_relative
 
 
+# --- Confirmation previews ---
+
+def _wikilink_key_for(src: Path, content: str, backend=None) -> str:
+    """The key other notes use to link to this note."""
+    if backend:
+        return backend.note_link_key(src, content)
+    match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
+    key = match.group(1).strip() if match else src.stem
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in ('"', "'"):
+        key = key[1:-1]
+    return key
+
+
+def preview_move(relative_path: str, destination_dir: str, vault: Path) -> str:
+    src = resolve_note_path(relative_path, vault)
+    if not src.exists():
+        raise FileNotFoundError(f"Note not found: {relative_path}")
+    dest = _validate_directory(destination_dir, vault) / src.name
+    lines = [f"Move `{relative_path}` -> `{dest.relative_to(vault)}`"]
+    if dest.exists():
+        lines.append("WARNING: a note already exists at that path; the move will fail.")
+    lines.append("Wikilinks are unaffected — only the file location changes.")
+    return "\n".join(lines)
+
+
+def preview_rename(relative_path: str, new_title: str, vault: Path, backend=None) -> str:
+    src = resolve_note_path(relative_path, vault)
+    if not src.exists():
+        raise FileNotFoundError(f"Note not found: {relative_path}")
+
+    content = src.read_text()
+    old_key = _wikilink_key_for(src, content, backend)
+    dest = src.parent / f"{_slugify(new_title)}.md"
+
+    lines = [
+        f"Rename `{relative_path}` -> `{dest.relative_to(vault)}`",
+        f"Frontmatter title: {old_key!r} -> {new_title!r}",
+    ]
+    if dest.exists() and dest != src:
+        lines.append("WARNING: a note already exists at that path; the rename will fail.")
+
+    # Every note whose wikilinks this rewrites.
+    pattern = re.compile(r"\[\[" + re.escape(old_key) + r"\]\]")
+    affected = []
+    for md_file in _iter_vault_md(vault):
+        try:
+            hits = len(pattern.findall(md_file.read_text()))
+        except OSError as e:
+            logger.warning("Skipping %s during rename preview: %s", md_file, e)
+            continue
+        if hits:
+            affected.append((str(md_file.relative_to(vault)), hits))
+
+    if affected:
+        total = sum(h for _, h in affected)
+        lines.append(f"\nWikilinks rewritten: {total} in {len(affected)} note(s):")
+        lines += [f"  - `{path}` ({hits} link{'s' if hits != 1 else ''})" for path, hits in sorted(affected)]
+    else:
+        lines.append("\nNo other note links to this one; no wikilinks will change.")
+    return "\n".join(lines)
+
+
+def preview_delete(relative_path: str, vault: Path, reason: str | None = None,
+                   archives_dir: str = _DEFAULT_ARCHIVES_DIR) -> str:
+    src = resolve_note_path(relative_path, vault)
+    if not src.exists():
+        raise FileNotFoundError(f"Note not found: {relative_path}")
+
+    content = src.read_text()
+    key = _wikilink_key_for(src, content)
+    lines = [
+        f"Archive `{relative_path}` -> `{archives_dir}/{src.name}` (soft delete, the file is moved not erased)",
+    ]
+    if reason:
+        lines.append(f"Recorded reason: {reason}")
+
+    refs = [r for r in find_references(key, vault) if r["path"] != relative_path]
+    if refs:
+        lines.append(f"\n{len(refs)} note(s) link to this one and will be left with broken links:")
+        lines += [f"  - `{r['path']}`" for r in refs]
+    else:
+        lines.append("\nNo other note links to this one.")
+    return "\n".join(lines)
+
+
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
     _archives = backend.config.archives_dir if backend else _DEFAULT_ARCHIVES_DIR
 
     @mcp.tool()
-    def move_note_tool(path: str, destination: str) -> str:
-        """Move a note to a different directory. Returns the new path."""
+    def move_note_tool(path: str, destination: str, confirm_token: str = "") -> str:
+        """Move a note to a different directory. Returns the new path.
+
+        Call without confirm_token to preview the move and receive a token,
+        then call again with the token to execute.
+        """
         try:
+            proposal = guard(
+                "move_note_tool", {"path": path, "destination": destination}, confirm_token,
+                lambda: preview_move(path, destination, vault),
+            )
+            if proposal:
+                return proposal
             return move_note(path, destination, vault)
+        except ConfirmError as e:
+            return error(INVALID_ARGUMENT, str(e))
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except FileExistsError as e:
@@ -206,10 +304,22 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
             return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
-    def rename_note_tool(path: str, new_title: str) -> str:
-        """Rename a note and update all wikilinks referencing it. Returns the new path."""
+    def rename_note_tool(path: str, new_title: str, confirm_token: str = "") -> str:
+        """Rename a note and update all wikilinks referencing it. Returns the new path.
+
+        Call without confirm_token to preview every note whose wikilinks would
+        change and receive a token, then call again with the token to execute.
+        """
         try:
+            proposal = guard(
+                "rename_note_tool", {"path": path, "new_title": new_title}, confirm_token,
+                lambda: preview_rename(path, new_title, vault, backend=backend),
+            )
+            if proposal:
+                return proposal
             return rename_note(path, new_title, vault, backend=backend)
+        except ConfirmError as e:
+            return error(INVALID_ARGUMENT, str(e))
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except FileExistsError as e:
@@ -218,10 +328,22 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
             return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
-    def delete_note_tool(path: str, reason: str = "") -> str:
-        """Soft-delete a note by moving it to archives/."""
+    def delete_note_tool(path: str, reason: str = "", confirm_token: str = "") -> str:
+        """Soft-delete a note by moving it to archives/.
+
+        Call without confirm_token to preview the archive path and any notes
+        left with broken links, then call again with the token to execute.
+        """
         try:
+            proposal = guard(
+                "delete_note_tool", {"path": path, "reason": reason}, confirm_token,
+                lambda: preview_delete(path, vault, reason=reason or None, archives_dir=_archives),
+            )
+            if proposal:
+                return proposal
             return delete_note(path, vault, reason=reason or None, archives_dir=_archives)
+        except ConfirmError as e:
+            return error(INVALID_ARGUMENT, str(e))
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:

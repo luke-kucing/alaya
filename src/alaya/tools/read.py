@@ -4,6 +4,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.vault import resolve_note_path, parse_note
+from alaya.confirm import ConfirmError, guard
 
 
 def reindex_vault(vault: Path, confirm: bool = False, force: bool = False) -> str:
@@ -251,6 +252,31 @@ def get_tags(vault: Path, backend=None) -> str:
 
 # --- FastMCP tool registration ---
 
+def preview_reindex(vault: Path, force: bool) -> str:
+    """Describe the work a reindex would do."""
+    lines = []
+    try:
+        from alaya.index.store import get_store
+        chunks = get_store(vault).count()
+        lines.append(f"Index currently holds {chunks} chunk(s).")
+    except Exception as e:  # index may be absent or unreadable — say so, don't fail
+        lines.append(f"Could not read current index state: {e}")
+
+    if force:
+        lines.append(
+            "force=True: FULL rebuild. Every note is re-chunked and re-embedded, which is "
+            "CPU-bound and can take minutes on a large vault. Search quality degrades until "
+            "it finishes."
+        )
+    else:
+        lines.append(
+            "Incremental: only notes whose content changed are re-embedded. Unchanged notes "
+            "are skipped."
+        )
+    lines.append("No notes are modified — this rebuilds the vector index only.")
+    return "\n".join(lines)
+
+
 def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
     @mcp.tool()
     def get_note_tool(path: str = "", title: str = "") -> str:
@@ -310,9 +336,25 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         return get_tags(vault, backend=backend)
 
     @mcp.tool()
-    def reindex_vault_tool(confirm: bool = False, force: bool = False) -> str:
+    def reindex_vault_tool(
+        confirm: bool = False, force: bool = False, confirm_token: str = ""
+    ) -> str:
         """Update the LanceDB vector index. Uses incremental mode by default (skips unchanged files).
 
-        confirm=True required. force=True for a full rebuild.
+        Call without confirm_token to see what the reindex would do and receive
+        a token, then call again with the token to execute. force=True is a full
+        rebuild. The legacy confirm=True flag still works when server-side
+        confirmation is disabled.
         """
-        return reindex_vault(vault, confirm=confirm, force=force)
+        try:
+            proposal = guard(
+                "reindex_vault_tool", {"force": force}, confirm_token,
+                lambda: preview_reindex(vault, force),
+            )
+        except ConfirmError as e:
+            return error(INVALID_ARGUMENT, str(e))
+        if proposal:
+            return proposal
+        # A verified token is itself the confirmation; confirm= remains for
+        # ALAYA_CONFIRM_MODE=off, where the old client-side contract applies.
+        return reindex_vault(vault, confirm=confirm or bool(confirm_token), force=force)
