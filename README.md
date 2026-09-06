@@ -268,6 +268,32 @@ Define your own under `[profiles]` in `alaya.toml`; a profile of the same name
 overrides a built-in. A profile naming a tool that does not exist is a startup
 error rather than a silently smaller tool list.
 
+### Output budget
+
+Every tool response ends with a `<!-- token_count: N -->` comment, so an agent
+can account for what a call cost without guessing.
+
+No response exceeds `ALAYA_MAX_TOOL_OUTPUT_TOKENS` (default 4000). A truncated
+response says how much was dropped and how to get it:
+
+```
+…[+2140 tokens truncated; narrow the query, lower limit, or pass unbounded=True]
+```
+
+`get_note` pages instead of just truncating. `offset` is a 0-based body line and
+`limit` is lines per page; the footer names the line to resume from, so
+successive calls reconstruct the whole note:
+
+```
+get_note(path="projects/big.md")
+  -> **Lines:** 0-84 of 300
+     …
+     …[+216 line(s) truncated; get_note(path="projects/big.md", offset=84)]
+```
+
+`get_note`, `list_notes`, `search_notes`, `get_tags`, `get_inbox`, `get_todos`,
+`find_references`, and `vault_graph` accept `unbounded=True` to bypass the cap.
+
 ### Destructive operations
 
 `delete_note`, `rename_note`, `move_note`, `replace_section`, `reindex_vault`,
@@ -406,6 +432,8 @@ Directory names are configurable via `alaya.toml` (see Configuration below). Not
 | `ALAYA_TOOL_PROFILE` | No | Limit which tools are exposed (`librarian`, `orchestrator`, `readonly`, or a profile from `alaya.toml`; default: `librarian`) |
 | `ALAYA_CONFIRM_MODE` | No | Server-side confirmation for destructive tools: `required` (default), `optional`, `off` |
 | `ALAYA_CONFIRM_TTL` | No | Seconds a confirm token stays valid (default: `60`) |
+| `ALAYA_MAX_TOOL_OUTPUT_TOKENS` | No | Cap on tool output in tokens; `0` disables capping (default: `4000`) |
+| `ALAYA_TOKENIZER` | No | tiktoken encoding used for token counts (default: `cl100k_base`) |
 | `GITLAB_PROJECT` | No | GitLab project path — enables GitLab provider |
 | `GITLAB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
 | `GITHUB_REPO` | No | GitHub repo (e.g. `owner/repo`) — enables GitHub provider |

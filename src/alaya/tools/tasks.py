@@ -91,8 +91,13 @@ def complete_todo(
 
 def _register(mcp: FastMCP, vault: Path) -> None:
     @mcp.tool()
-    def get_todos_tool(directories: list[str] | None = None) -> str:
-        """Find all open tasks (- [ ] ...) in the vault. Optionally restrict to directories."""
+    def get_todos_tool(
+        directories: list[str] | None = None, unbounded: bool = False
+    ) -> str:
+        """Find all open tasks (- [ ] ...) in the vault. Optionally restrict to directories.
+
+        Output is capped; pass unbounded=True to bypass the cap.
+        """
         todos = get_todos(vault, directories=directories or None)
         if not todos:
             return "No open tasks found."

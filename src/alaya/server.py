@@ -53,12 +53,32 @@ def _register_all(vault: Path, backend=None, cache=None) -> None:
     enrich._register(mcp, vault)
 
 
+# How a caller gets the rest of a truncated response, per tool. Tools absent
+# here fall back to the generic footer.
+_TRUNCATION_HINTS = {
+    "search_notes_tool": "narrow the query, lower limit, or pass unbounded=True",
+    "list_notes_tool": "lower limit or pass unbounded=True",
+    "get_todos_tool": "restrict directories or pass unbounded=True",
+    "find_references_tool": "pass unbounded=True",
+    "get_tags_tool": "pass unbounded=True",
+    "get_inbox_tool": "pass unbounded=True",
+    "vault_graph_tool": "lower max_nodes or pass unbounded=True",
+}
+
+
 def _instrument_tools(vault: Path, backend=None) -> None:
-    """Wrap all registered MCP tools with audit logging."""
+    """Wrap all registered MCP tools with audit logging and response shaping.
+
+    Shaping happens here rather than in each tool so that no tool can forget:
+    every response is capped to ALAYA_MAX_TOOL_OUTPUT_TOKENS and carries a
+    token_count comment. Tools that page their own output (get_note) cap
+    themselves first, so their resumable footer survives.
+    """
     import asyncio
     import time
     from alaya.audit import log_tool_call
     from alaya.confirm import audit_id_for
+    from alaya.responses import shape
 
     audit_path = backend.config.audit_log_path if backend else None
 
@@ -72,6 +92,11 @@ def _instrument_tools(vault: Path, backend=None) -> None:
                 start = time.perf_counter()
                 result = _orig(*args, **kwargs)
                 elapsed = (time.perf_counter() - start) * 1000
+                result = shape(
+                    result,
+                    unbounded=bool(kwargs.get("unbounded")),
+                    hint=_TRUNCATION_HINTS.get(_name),
+                )
                 rendered = str(result)
                 log_tool_call(
                     vault, _name, kwargs, rendered[:200], elapsed,

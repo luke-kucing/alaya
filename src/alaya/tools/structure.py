@@ -350,8 +350,13 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
             return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
-    def find_references_tool(title: str, include_text_mentions: bool = False) -> str:
-        """Find all notes that reference the given title as a wikilink or text mention."""
+    def find_references_tool(
+        title: str, include_text_mentions: bool = False, unbounded: bool = False
+    ) -> str:
+        """Find all notes that reference the given title as a wikilink or text mention.
+
+        Output is capped; pass unbounded=True to bypass the cap.
+        """
         results = find_references(title, vault, include_text_mentions)
         if not results:
             return f"No references to '{title}' found."

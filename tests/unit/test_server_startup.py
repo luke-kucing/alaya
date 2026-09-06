@@ -90,3 +90,84 @@ class TestParseArgs:
 
         with pytest.raises(SystemExit):
             _parse_args(["--nope"])
+
+
+class TestResponseShaping:
+    """The instrumentation wrapper must cap and annotate every tool response."""
+
+    def _wrap(self, vault: Path, fn, name: str, kwargs: dict):
+        """Run fn through the same shaping the server wrapper applies."""
+        from alaya.responses import shape
+        from alaya.server import _TRUNCATION_HINTS
+
+        return shape(
+            fn(**kwargs),
+            unbounded=bool(kwargs.get("unbounded")),
+            hint=_TRUNCATION_HINTS.get(name),
+        )
+
+    def test_every_response_carries_a_token_count(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        out = self._wrap(
+            vault,
+            lambda **_: get_note("projects/second-brain.md", vault),
+            "get_note_tool",
+            {},
+        )
+        assert "<!-- token_count:" in out
+
+    def test_cap_applies_with_a_tool_specific_hint(
+        self, vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
+        out = self._wrap(
+            vault, lambda **_: "word " * 2000, "search_notes_tool", {}
+        )
+        assert "truncated" in out
+        assert "narrow the query" in out
+
+    def test_unbounded_kwarg_bypasses_the_cap(
+        self, vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
+        out = self._wrap(
+            vault, lambda **_: "word " * 2000, "search_notes_tool", {"unbounded": True}
+        )
+        assert "truncated" not in out
+
+    def test_memory_recall_token_count_is_not_duplicated(self, vault: Path) -> None:
+        from alaya.responses import shape
+
+        body = "recall body\n\n<!-- token_count: 5; sources: 2 -->"
+        assert shape(body).count("token_count:") == 1
+
+    def test_every_tool_name_in_the_hint_map_exists(self, vault: Path) -> None:
+        import asyncio
+
+        from fastmcp import FastMCP
+        from alaya.server import _TRUNCATION_HINTS
+        from alaya.tools import graph, inbox, read, search, structure, tasks
+
+        mcp = FastMCP(name="alaya-test")
+        for mod in (read, search, structure, tasks, inbox, graph):
+            mod._register(mcp, vault)
+        registered = {t.name for t in asyncio.run(mcp.list_tools())}
+
+        assert set(_TRUNCATION_HINTS) <= registered
+
+    def test_every_hinted_tool_declares_unbounded(self, vault: Path) -> None:
+        import asyncio
+
+        from fastmcp import FastMCP
+        from alaya.server import _TRUNCATION_HINTS
+        from alaya.tools import graph, inbox, read, search, structure, tasks
+
+        mcp = FastMCP(name="alaya-test")
+        for mod in (read, search, structure, tasks, inbox, graph):
+            mod._register(mcp, vault)
+        by_name = {t.name: t for t in asyncio.run(mcp.list_tools())}
+
+        for name in _TRUNCATION_HINTS:
+            params = by_name[name].parameters["properties"]
+            assert "unbounded" in params, f"{name} is hinted but cannot be unbounded"
