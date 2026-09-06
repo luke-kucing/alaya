@@ -33,6 +33,7 @@ class VaultConfig:
 
     daily_dir: str = "daily"
     people_dir: str = "people"
+    agent_dir: str = "agents"
     archives_dir: str = "archives"
     default_capture_dir: str = "ideas"
     default_external_dir: str = "projects"

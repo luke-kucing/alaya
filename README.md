@@ -222,6 +222,29 @@ Query ──▶ Router ──▶ Retrieval ──▶ Correction ──▶ Expans
 |---|---|
 | `search_notes` | Hybrid semantic + keyword search with adaptive routing, corrective RAG, and optional reranking/graph expansion/HyDE |
 
+Notes carrying frontmatter `type: agent-memory` are excluded from `search_notes`
+by default so agent scratch memory cannot crowd out curated notes. Pass
+`include_types=["agent-memory"]` to search them explicitly.
+
+### Agent memory
+
+For agent harnesses rather than humans. A loop iteration needs budgeted
+retrieval in one call, somewhere durable to put a summary when its context is
+compacted, and a way to rebuild working memory from a fresh context.
+
+| Tool | Purpose |
+|---|---|
+| `memory_recall` | Retrieve vault context for a query, trimmed to a token budget. Returns chunk text directly — no follow-up `get_note` per hit |
+| `memory_checkpoint` | Persist a session summary, decisions, open items, and entities to `agents/<session>/checkpoint.md` as `type: agent-memory` |
+| `memory_resume` | Return the latest checkpoint plus its 1-hop linked notes, budgeted — the handoff document a fresh iteration starts from |
+
+Every response ends with a `<!-- token_count: N -->` comment so a caller can do
+its own budget accounting. Entities passed to `memory_checkpoint` are written as
+wikilinks, so checkpoints join the note graph and graph RAG can reach them.
+
+Token counting uses tiktoken's `cl100k` encoding when the `tokenizer` extra is
+installed, and a word-based approximation otherwise.
+
 ### Edit & structure
 
 | Tool | Purpose |
@@ -349,6 +372,7 @@ project = "projects"
 learning = "learning"
 resource = "resources"
 daily = "daily"
+agent = "agents"      # where memory_checkpoint writes
 
 [settings]
 archives_dir = "archives"
@@ -363,6 +387,9 @@ All fields are optional. Without this file, alaya auto-detects the backend from 
 ```bash
 # Install cross-encoder reranking support
 uv sync --extra rerank
+
+# Install tiktoken for exact token counting in the agent memory tools
+uv sync --extra tokenizer
 ```
 
 Pass additional env vars when registering with Claude Code using `-e`:
