@@ -245,6 +245,29 @@ wikilinks, so checkpoints join the note graph and graph RAG can reach them.
 Token counting uses tiktoken's `cl100k` encoding when the `tokenizer` extra is
 installed, and a word-based approximation otherwise.
 
+### Tool profiles
+
+alaya registers ~35 tools. For smaller local models the JSON schemas are a real
+fraction of the context window, and the size of the decision surface hurts
+tool-call accuracy. A profile trims the exposed set at startup, so every client
+benefits rather than each having to filter for itself.
+
+| Profile | Tools |
+|---|---|
+| `librarian` | Everything. The default — existing clients see no change |
+| `orchestrator` | Memory, search, and capture: `memory_*`, `search_notes`, `get_note`, `smart_capture`, `append_to_note`, `get_todos` |
+| `readonly` | Read the vault, never change it: search, navigation, stats, health, `memory_recall` |
+
+```bash
+alaya --profile orchestrator
+# or
+ALAYA_TOOL_PROFILE=readonly alaya
+```
+
+Define your own under `[profiles]` in `alaya.toml`; a profile of the same name
+overrides a built-in. A profile naming a tool that does not exist is a startup
+error rather than a silently smaller tool list.
+
 ### Edit & structure
 
 | Tool | Purpose |
@@ -350,6 +373,7 @@ Directory names are configurable via `alaya.toml` (see Configuration below). Not
 | `ALAYA_VAULT_DIR` | Yes | Path to your vault (e.g. `~/notes`) |
 | `ZK_NOTEBOOK_DIR` | Compat | Backward-compatible alias for `ALAYA_VAULT_DIR` |
 | `ALAYA_EMBEDDING_MODEL` | No | Embedding model variant (`nomic-v1.5` or `nomic-v1.5-q4`, default: `nomic-v1.5`) |
+| `ALAYA_TOOL_PROFILE` | No | Limit which tools are exposed (`librarian`, `orchestrator`, `readonly`, or a profile from `alaya.toml`; default: `librarian`) |
 | `GITLAB_PROJECT` | No | GitLab project path — enables GitLab provider |
 | `GITLAB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
 | `GITHUB_REPO` | No | GitHub repo (e.g. `owner/repo`) — enables GitHub provider |
@@ -378,6 +402,11 @@ agent = "agents"      # where memory_checkpoint writes
 archives_dir = "archives"
 default_capture_dir = "inbox"
 default_external_dir = "external"
+
+[profiles]
+# Custom tool profiles. "*" means every tool. Names may be written with or
+# without the `_tool` suffix. A profile of the same name overrides a built-in.
+planner = ["memory_recall", "memory_resume", "search_notes", "get_note"]
 ```
 
 All fields are optional. Without this file, alaya auto-detects the backend from `.zk/` or `.obsidian/` and uses sensible defaults.

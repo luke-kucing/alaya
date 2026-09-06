@@ -1,3 +1,4 @@
+import argparse
 import logging
 import subprocess
 from pathlib import Path
@@ -195,7 +196,27 @@ def _maybe_start_reembed(vault_root, store) -> None:
     t.start()
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="alaya",
+        description="FastMCP server for personal knowledge vaults (zk and Obsidian).",
+    )
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Tool profile limiting which tools are exposed "
+            "(built-ins: librarian, orchestrator, readonly). "
+            "Overrides ALAYA_TOOL_PROFILE."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
+
     try:
         vault_root = get_vault_root()
     except ConfigError as e:
@@ -221,6 +242,20 @@ def main() -> None:
 
     _register_all(vault_root, backend=backend, cache=cache)
     _register_health_tool(vault_root)
+
+    # Trim to the active profile before instrumenting, so removed tools are
+    # never wrapped and never reach a client's schema list.
+    from alaya.profiles import ProfileError, apply_profile, get_profile_name
+    profile_name = get_profile_name(args.profile)
+    import asyncio
+    try:
+        asyncio.get_event_loop().run_until_complete(
+            apply_profile(mcp, profile_name, vault_root)
+        )
+    except ProfileError as e:
+        logger.error("Tool profile error: %s", e)
+        raise SystemExit(1)
+
     _instrument_tools(vault_root, backend=backend)
 
     from alaya.index.store import get_store, get_index_model

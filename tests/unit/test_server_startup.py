@@ -72,3 +72,21 @@ def test_maybe_start_reembed_spawns_thread_on_mismatch(tmp_path: Path) -> None:
         import time; time.sleep(0.05)
 
     assert started
+
+
+class TestParseArgs:
+    def test_profile_defaults_to_none(self) -> None:
+        from alaya.server import _parse_args
+
+        assert _parse_args([]).profile is None
+
+    def test_profile_flag_is_parsed(self) -> None:
+        from alaya.server import _parse_args
+
+        assert _parse_args(["--profile", "orchestrator"]).profile == "orchestrator"
+
+    def test_unknown_flag_exits(self) -> None:
+        from alaya.server import _parse_args
+
+        with pytest.raises(SystemExit):
+            _parse_args(["--nope"])
