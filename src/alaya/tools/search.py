@@ -6,6 +6,11 @@ from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
+# Agent scratch memory (checkpoints, lessons) is excluded from human-facing
+# searches by default so it cannot crowd out curated notes.
+AGENT_MEMORY_TYPE = "agent-memory"
+DEFAULT_EXCLUDE_TYPES = [AGENT_MEMORY_TYPE]
+
 
 _hybrid_available_cache: bool | None = None
 
@@ -38,6 +43,8 @@ def _run_routed_search(
     limit: int = 20,
     rerank: bool = False,
     hyde: bool = False,
+    include_types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
 ) -> list[dict]:
     """Route the query to the best search strategy, then execute."""
     from alaya.index.router import classify_query, QueryStrategy
@@ -55,6 +62,7 @@ def _run_routed_search(
         results = keyword_search(
             routed.query, store,
             directory=directory, tags=tags, since=effective_since, limit=limit,
+            include_types=include_types, exclude_types=exclude_types,
         )
         # Fall through to hybrid if keyword search returns nothing
         if results:
@@ -70,6 +78,7 @@ def _run_routed_search(
     return hybrid_search(
         routed.query, query_embedding, store,
         directory=directory, tags=tags, since=effective_since, limit=limit, rerank=rerank,
+        include_types=include_types, exclude_types=exclude_types,
     )
 
 
@@ -82,12 +91,15 @@ def _run_corrective_search(
     limit: int = 20,
     rerank: bool = False,
     hyde: bool = False,
+    include_types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
 ) -> list[dict]:
     """Search with corrective RAG: retry with reformulated queries if results are poor."""
     from alaya.index.corrective import needs_correction, filter_relevant, reformulate_query
 
     results = _run_routed_search(
         query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
+        include_types=include_types, exclude_types=exclude_types,
     )
 
     # Filter out irrelevant results
@@ -102,6 +114,7 @@ def _run_corrective_search(
         logger.debug("Corrective RAG retry with: %r", alt_query)
         alt_results = _run_routed_search(
             alt_query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
+            include_types=include_types, exclude_types=exclude_types,
         )
         alt_results = filter_relevant(alt_results)
         if not needs_correction(alt_results):
@@ -148,6 +161,8 @@ def search_notes(
     rerank: bool = False,
     graph_expand: bool = False,
     hyde: bool = False,
+    include_types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
     backend=None,
     cache=None,
 ) -> str:
@@ -156,9 +171,13 @@ def search_notes(
     Uses adaptive query routing when an index is available; falls back to
     backend keyword search otherwise.
     """
+    if exclude_types is None and not include_types:
+        exclude_types = DEFAULT_EXCLUDE_TYPES
+
     if _hybrid_search_available(vault):
         results = _run_corrective_search(
             query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
+            include_types=include_types, exclude_types=exclude_types,
         )
         if graph_expand and results:
             from alaya.index.graph_rag import expand_with_graph
@@ -230,6 +249,8 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         rerank: bool = False,
         graph_expand: bool = False,
         hyde: bool = False,
+        include_types: list[str] | None = None,
+        exclude_types: list[str] | None = None,
     ) -> str:
         """Search notes by keyword or semantic query. Filter by directory, tags, or since date.
 
@@ -243,6 +264,9 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         Set graph_expand=True to include wikilink-connected notes in results.
         Set hyde=True for semantic queries to embed a hypothetical answer
         instead of the raw query (bridges vocabulary gaps).
+
+        Agent scratch memory (frontmatter `type: agent-memory`) is excluded by
+        default. Pass include_types=["agent-memory"] to search it explicitly.
         """
         return search_notes(
             query,
@@ -254,6 +278,8 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
             rerank=rerank,
             graph_expand=graph_expand,
             hyde=hyde,
+            include_types=include_types or None,
+            exclude_types=exclude_types,
             backend=backend,
             cache=cache,
         )

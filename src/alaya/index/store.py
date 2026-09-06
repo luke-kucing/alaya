@@ -77,6 +77,7 @@ class VaultStore:
                         pa.field("title", pa.string()),
                         pa.field("directory", pa.string()),
                         pa.field("tags", pa.string()),  # comma-separated
+                        pa.field("note_type", pa.string()),  # frontmatter `type`, "" when absent
                         pa.field("modified_date", pa.string()),
                         pa.field("chunk_index", pa.int32()),
                         pa.field("text", pa.string()),
@@ -167,7 +168,9 @@ def upsert_note(
         return
 
     # Check if the table has the embedding_model column (absent on old schemas)
-    has_model_col = "embedding_model" in {f.name for f in table.schema}
+    columns = {f.name for f in table.schema}
+    has_model_col = "embedding_model" in columns
+    has_type_col = "note_type" in columns
 
     rows = []
     for chunk, embedding in zip(chunks, embeddings):
@@ -183,6 +186,8 @@ def upsert_note(
         }
         if has_model_col:
             row["embedding_model"] = active_model
+        if has_type_col:
+            row["note_type"] = getattr(chunk, "note_type", "") or ""
         rows.append(row)
 
     table.add(rows)
@@ -246,6 +251,8 @@ def _build_filter(
     directory: str | None,
     tags: list[str] | None,
     since: str | None,
+    include_types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
 ) -> str | None:
     """Build a SQL WHERE clause from optional metadata filters."""
     filters = []
@@ -256,6 +263,13 @@ def _build_filter(
             filters.append(f"tags LIKE '%,{_sq_like(tag)},%' ESCAPE '\\'")
     if since:
         filters.append(f"modified_date >= '{_sq(since)}'")
+    if include_types:
+        listed = ", ".join(f"'{_sq(t)}'" for t in include_types)
+        filters.append(f"note_type IN ({listed})")
+    if exclude_types:
+        listed = ", ".join(f"'{_sq(t)}'" for t in exclude_types)
+        # note_type is "" for untyped notes, never NULL, so IN-negation is total.
+        filters.append(f"note_type NOT IN ({listed})")
     return " AND ".join(filters) if filters else None
 
 
@@ -305,6 +319,8 @@ def hybrid_search(
     since: str | None = None,
     limit: int = 10,
     rerank: bool = False,
+    include_types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
 ) -> list[dict]:
     """Search using LanceDB native hybrid search (vector + BM25 FTS) with RRF.
 
@@ -316,7 +332,7 @@ def hybrid_search(
     if store.count() == 0:
         return []
 
-    where = _build_filter(directory, tags, since)
+    where = _build_filter(directory, tags, since, include_types, exclude_types)
     # When reranking, fetch more candidates so the cross-encoder has a larger pool
     candidate_limit = limit * 8 if rerank else limit * 4
 
@@ -392,6 +408,8 @@ def keyword_search(
     tags: list[str] | None = None,
     since: str | None = None,
     limit: int = 10,
+    include_types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
 ) -> list[dict]:
     """FTS-only search using BM25. Best for short exact-term queries.
 
@@ -400,7 +418,7 @@ def keyword_search(
     if store.count() == 0 or not store.ensure_fts_index():
         return []
 
-    where = _build_filter(directory, tags, since)
+    where = _build_filter(directory, tags, since, include_types, exclude_types)
     try:
         table = store._get_table()
         q = table.search(query, query_type="fts").limit(limit * 4)

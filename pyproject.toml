@@ -34,6 +34,9 @@ late-chunking = [
     "transformers>=4.40",
     "torch>=2.0",
 ]
+tokenizer = [
+    "tiktoken>=0.8",
+]
 
 [dependency-groups]
 dev = [

@@ -21,7 +21,10 @@ def _approx_tokens(text: str) -> int:
     return int(len(text.split()) * 1.3)
 
 
-def _make_chunk(path: str, text: str, idx: int, title: str, tags: list[str], date: str) -> Chunk:
+def _make_chunk(
+    path: str, text: str, idx: int, title: str, tags: list[str], date: str,
+    note_type: str = "",
+) -> Chunk:
     directory = path.split("/")[0] if "/" in path else ""
     return Chunk(
         path=path,
@@ -31,6 +34,7 @@ def _make_chunk(path: str, text: str, idx: int, title: str, tags: list[str], dat
         modified_date=date,
         chunk_index=idx,
         text=text.strip(),
+        note_type=note_type,
     )
 
 
@@ -63,7 +67,7 @@ class SectionChunker:
             raw_sections.append((current_header, current_lines))
 
         if not raw_sections:
-            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
+            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
 
         chunks: list[Chunk] = []
         idx = 0
@@ -77,13 +81,13 @@ class SectionChunker:
             if _approx_tokens(full_text) > config.max_tokens:
                 sub_chunks = _split_on_paragraphs(full_text, config)
                 for sub in sub_chunks:
-                    chunks.append(_make_chunk(path, sub, idx, title, note.tags, note.date))
+                    chunks.append(_make_chunk(path, sub, idx, title, note.tags, note.date, note.extra.get("type", "")))
                     idx += 1
             else:
-                chunks.append(_make_chunk(path, full_text, idx, title, note.tags, note.date))
+                chunks.append(_make_chunk(path, full_text, idx, title, note.tags, note.date, note.extra.get("type", "")))
                 idx += 1
 
-        return chunks or [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
+        return chunks or [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
 
 
 class SlidingWindowChunker:
@@ -95,7 +99,7 @@ class SlidingWindowChunker:
         words = note.body.split()
 
         if not words:
-            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
+            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
 
         # Convert token limits to approximate word counts
         window = max(1, int(config.max_tokens / 1.3))
@@ -109,7 +113,7 @@ class SlidingWindowChunker:
             end = min(start + window, len(words))
             text = " ".join(words[start:end])
             if _approx_tokens(text) >= config.min_chunk_tokens or not chunks:
-                chunks.append(_make_chunk(path, text, idx, title, note.tags, note.date))
+                chunks.append(_make_chunk(path, text, idx, title, note.tags, note.date, note.extra.get("type", "")))
                 idx += 1
             start += step
 
@@ -125,7 +129,7 @@ class SemanticChunker:
         paragraphs = _extract_paragraphs(note.body)
 
         if not paragraphs:
-            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
+            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
 
         # Merge short paragraphs up to max_tokens
         merged: list[str] = []
@@ -146,11 +150,11 @@ class SemanticChunker:
             merged.append("\n\n".join(current_parts))
 
         chunks = [
-            _make_chunk(path, text, idx, title, note.tags, note.date)
+            _make_chunk(path, text, idx, title, note.tags, note.date, note.extra.get("type", ""))
             for idx, text in enumerate(merged)
             if text.strip()
         ]
-        return chunks or [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
+        return chunks or [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
 
 
 class DailyNoteChunker:
@@ -178,7 +182,7 @@ class DailyNoteChunker:
             raw_sections.append((current_header, current_lines))
 
         if not raw_sections:
-            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
+            return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
 
         chunks = []
         for idx, (header, section_lines) in enumerate(raw_sections):
@@ -186,9 +190,9 @@ class DailyNoteChunker:
             if not text:
                 continue
             full_text = f"{header}\n{text}" if header else text
-            chunks.append(_make_chunk(path, full_text, idx, title, note.tags, note.date))
+            chunks.append(_make_chunk(path, full_text, idx, title, note.tags, note.date, note.extra.get("type", "")))
 
-        return chunks or [_make_chunk(path, content.strip(), 0, title, note.tags, note.date)]
+        return chunks or [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
 
 
 def select_strategy(path: str, content: str, daily_dir: str = "daily") -> ChunkingStrategy:

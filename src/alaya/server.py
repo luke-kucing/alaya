@@ -30,7 +30,7 @@ mcp = FastMCP(
 
 # Explicit registration: server -> tools (one direction only).
 # vault is resolved once here and closed over in each tool wrapper.
-from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, stats, graph, capture, enrich  # noqa: E402
+from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, stats, graph, capture, enrich, memory  # noqa: E402
 
 def _register_all(vault: Path, backend=None, cache=None) -> None:
     # Tools that accept a backend parameter
@@ -41,6 +41,7 @@ def _register_all(vault: Path, backend=None, cache=None) -> None:
     graph._register(mcp, vault, backend=backend, cache=cache)
     capture._register(mcp, vault, backend=backend)
     external._register(mcp, vault, backend=backend)
+    memory._register(mcp, vault, backend=backend, cache=cache)
 
     # Tools that don't need backend
     write._register(mcp, vault)

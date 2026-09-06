@@ -60,6 +60,7 @@ class Chunk:
     modified_date: str
     chunk_index: int
     text: str
+    note_type: str = ""
 
 
 def chunk_note(path: str, content: str, contextual: bool = True) -> list[Chunk]:
