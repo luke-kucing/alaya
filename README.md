@@ -185,7 +185,7 @@ Query ──▶ Router ──▶ Retrieval ──▶ Correction ──▶ Expans
 
 **Tools return Markdown strings.** Claude reads Markdown; it doesn't parse JSON. Tables, bullet lists, and metadata headers are formatted for Claude consumption.
 
-**Confirmation lives in Claude, not the server.** The server executes; Claude proposes and waits for user approval on destructive ops.
+**Confirmation lives in the server, with Claude on top.** Claude Code prompts before a destructive tool call, but an arbitrary MCP client — an agent loop, a custom harness — will not. Destructive tools are therefore two-phase server-side: the first call returns a preview and a token, the second executes. See [Destructive operations](#destructive-operations). Set `ALAYA_CONFIRM_MODE=off` to restore the older client-side-only contract.
 
 **External systems are bridges, not mirrors.** The vault doesn't replicate GitLab/GitHub/Outline — it pulls context in and pushes ideas out.
 
@@ -267,6 +267,36 @@ ALAYA_TOOL_PROFILE=readonly alaya
 Define your own under `[profiles]` in `alaya.toml`; a profile of the same name
 overrides a built-in. A profile naming a tool that does not exist is a startup
 error rather than a silently smaller tool list.
+
+### Destructive operations
+
+`delete_note`, `rename_note`, `move_note`, `replace_section`, `reindex_vault`,
+and `clear_inbox_item` are two-phase. The first call returns a preview of what
+would change plus a `confirm_token`; the second call, with that token, executes.
+
+```
+delete_note(path="projects/old.md")
+  -> CONFIRM REQUIRED — delete_note_tool
+     Archive `projects/old.md` -> `archives/old.md` (soft delete, the file is moved not erased)
+     2 note(s) link to this one and will be left with broken links: …
+     confirm_token="1757193042.a1b2…"
+
+delete_note(path="projects/old.md", confirm_token="1757193042.a1b2…")
+  -> archives/old.md
+```
+
+The token is an HMAC over the tool name, the arguments, and an expiry, keyed by a
+secret generated per process. It cannot be replayed against different arguments,
+expires after `ALAYA_CONFIRM_TTL` seconds, and does not survive a restart. The
+propose and execute entries share a `confirm_id` in the audit log.
+
+`rename_note`'s preview lists every note whose wikilinks would be rewritten.
+
+| Mode | Behaviour |
+|---|---|
+| `required` (default) | Preview first, token required to execute |
+| `optional` | Executes directly, but a supplied token is still validated |
+| `off` | Previous behaviour — confirmation is the client's job |
 
 ### Edit & structure
 
@@ -374,6 +404,8 @@ Directory names are configurable via `alaya.toml` (see Configuration below). Not
 | `ZK_NOTEBOOK_DIR` | Compat | Backward-compatible alias for `ALAYA_VAULT_DIR` |
 | `ALAYA_EMBEDDING_MODEL` | No | Embedding model variant (`nomic-v1.5` or `nomic-v1.5-q4`, default: `nomic-v1.5`) |
 | `ALAYA_TOOL_PROFILE` | No | Limit which tools are exposed (`librarian`, `orchestrator`, `readonly`, or a profile from `alaya.toml`; default: `librarian`) |
+| `ALAYA_CONFIRM_MODE` | No | Server-side confirmation for destructive tools: `required` (default), `optional`, `off` |
+| `ALAYA_CONFIRM_TTL` | No | Seconds a confirm token stays valid (default: `60`) |
 | `GITLAB_PROJECT` | No | GitLab project path — enables GitLab provider |
 | `GITLAB_DEFAULT_LABELS` | No | Comma-separated default labels for new issues |
 | `GITHUB_REPO` | No | GitHub repo (e.g. `owner/repo`) — enables GitHub provider |

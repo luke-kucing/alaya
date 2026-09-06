@@ -58,6 +58,7 @@ def _instrument_tools(vault: Path, backend=None) -> None:
     import asyncio
     import time
     from alaya.audit import log_tool_call
+    from alaya.confirm import audit_id_for
 
     audit_path = backend.config.audit_log_path if backend else None
 
@@ -71,7 +72,12 @@ def _instrument_tools(vault: Path, backend=None) -> None:
                 start = time.perf_counter()
                 result = _orig(*args, **kwargs)
                 elapsed = (time.perf_counter() - start) * 1000
-                log_tool_call(vault, _name, kwargs, str(result)[:200], elapsed, audit_path=audit_path)
+                rendered = str(result)
+                log_tool_call(
+                    vault, _name, kwargs, rendered[:200], elapsed,
+                    audit_path=audit_path,
+                    confirm_id=audit_id_for(kwargs, rendered),
+                )
                 return result
             return wrapper
 

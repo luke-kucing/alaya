@@ -2,10 +2,11 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, SECTION_NOT_FOUND, ALREADY_EXISTS
+from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, SECTION_NOT_FOUND, ALREADY_EXISTS, INVALID_ARGUMENT
 from alaya.vault import resolve_note_path
 from alaya.tools.write import create_note
 from alaya.tools._locks import get_path_lock, atomic_write
+from alaya.confirm import ConfirmError, guard
 
 
 def _parse_sections(content: str) -> list[tuple[str, int, int]]:
@@ -124,13 +125,60 @@ def extract_section(
 
 # --- FastMCP tool registration ---
 
+def preview_replace_section(relative_path: str, section: str, new_content: str, vault: Path) -> str:
+    """Show a unified diff of the section body that would be replaced."""
+    import difflib
+
+    path = resolve_note_path(relative_path, vault)
+    if not path.exists():
+        raise FileNotFoundError(f"Note not found: {relative_path}")
+
+    content = path.read_text()
+    lines = content.splitlines()
+    match = next(
+        (s for s in _parse_sections(content) if s[0].lower() == section.lower()), None
+    )
+    if match is None:
+        raise ValueError(f"SECTION_NOT_FOUND: '{section}' in {relative_path}")
+
+    _, start, end = match
+    old_body = lines[start + 1:end]
+    diff = list(difflib.unified_diff(
+        old_body, new_content.splitlines(),
+        fromfile=f"{relative_path}:{section} (current)",
+        tofile=f"{relative_path}:{section} (proposed)",
+        lineterm="",
+    ))
+
+    header = f"Replace section '{section}' in `{relative_path}` ({len(old_body)} line(s) overwritten)"
+    if not diff:
+        return f"{header}\n\nNo change — the new content is identical."
+    return header + "\n\n```diff\n" + "\n".join(diff) + "\n```"
+
+
 def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
     @mcp.tool()
-    def replace_section_tool(path: str, section: str, new_content: str) -> str:
-        """Replace the content of a named ## section in a note."""
+    def replace_section_tool(
+        path: str, section: str, new_content: str, confirm_token: str = ""
+    ) -> str:
+        """Replace the content of a named ## section in a note.
+
+        Call without confirm_token to see a diff of what would be overwritten
+        and receive a token, then call again with the token to execute.
+        """
         try:
+            proposal = guard(
+                "replace_section_tool",
+                {"path": path, "section": section, "new_content": new_content},
+                confirm_token,
+                lambda: preview_replace_section(path, section, new_content, vault),
+            )
+            if proposal:
+                return proposal
             replace_section(path, section, new_content, vault)
             return f"Section '{section}' updated in `{path}`."
+        except ConfirmError as e:
+            return error(INVALID_ARGUMENT, str(e))
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:
