@@ -35,32 +35,125 @@ def reindex_vault(vault: Path, confirm: bool = False, force: bool = False) -> st
         return f"Reindex failed: {e}"
 
 
-def _format_note(relative_path: str, content: str) -> str:
-    """Format a note with a structured metadata header above the body."""
+def _format_note(
+    relative_path: str,
+    content: str,
+    offset: int = 0,
+    limit: int | None = None,
+    unbounded: bool = False,
+) -> str:
+    """Format a note with a structured metadata header above the body.
+
+    *offset* and *limit* page through the body by line. Paging is applied before
+    the output cap, and the truncation footer names the line to resume from, so
+    successive calls reconstruct the whole note.
+    """
     note = parse_note(content)
     title = note.title or Path(relative_path).stem
     tags_raw = " ".join(f"#{t}" for t in note.tags)
 
-    lines = [f"**Title:** {title}", f"**Date:** {note.date}"]
+    header = [f"**Title:** {title}", f"**Date:** {note.date}"]
     if tags_raw:
-        lines.append(f"**Tags:** {tags_raw}")
-    lines.append(f"**Path:** {relative_path}")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-    lines.append(note.body.strip())
-    return "\n".join(lines)
+        header.append(f"**Tags:** {tags_raw}")
+    header.append(f"**Path:** {relative_path}")
+
+    body_lines = note.body.strip().splitlines()
+    total_lines = len(body_lines)
+
+    if offset < 0:
+        raise ValueError("offset must be zero or positive")
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be positive")
+
+    end = total_lines if limit is None else min(offset + limit, total_lines)
+    page = body_lines[offset:end]
+
+    if offset or limit is not None:
+        header.append(f"**Lines:** {offset}-{end} of {total_lines}")
+
+    parts = header + ["", "---", ""] + page
+    rendered = "\n".join(parts)
+
+    if unbounded:
+        return _with_more_marker(rendered, relative_path, end, total_lines)
+
+    capped, truncated = _cap_note_body(rendered, relative_path, header, page, offset)
+    if truncated:
+        return capped
+    return _with_more_marker(rendered, relative_path, end, total_lines)
 
 
-def get_note(relative_path: str, vault: Path) -> str:
+def _with_more_marker(rendered: str, relative_path: str, end: int, total_lines: int) -> str:
+    """Note where to resume when paging stopped short of the end."""
+    if end >= total_lines:
+        return rendered
+    remaining = total_lines - end
+    return (
+        f"{rendered}\n\n…[+{remaining} more line(s); "
+        f'get_note(path="{relative_path}", offset={end})]'
+    )
+
+
+def _cap_note_body(
+    rendered: str,
+    relative_path: str,
+    header: list[str],
+    page: list[str],
+    offset: int,
+) -> tuple[str, bool]:
+    """Trim the body to the output cap, resumable by line offset."""
+    from alaya.responses import get_max_output_tokens
+    from alaya.tokens import count_tokens
+
+    limit = get_max_output_tokens()
+    if limit <= 0 or count_tokens(rendered) <= limit:
+        return rendered, False
+
+    prefix = "\n".join(header + ["", "---", ""])
+    budget = limit - count_tokens(prefix) - 60
+    kept: list[str] = []
+    used = 0
+    for line in page:
+        cost = count_tokens(line) + 1
+        if used + cost > budget:
+            break
+        kept.append(line)
+        used += cost
+
+    resume = offset + len(kept)
+    dropped = len(page) - len(kept)
+    body = "\n".join(header + ["", "---", ""] + kept)
+    footer = (
+        f"…[+{dropped} line(s) truncated; "
+        f'get_note(path="{relative_path}", offset={resume})]'
+    )
+    return f"{body}\n\n{footer}", True
+
+
+def get_note(
+    relative_path: str,
+    vault: Path,
+    offset: int = 0,
+    limit: int | None = None,
+    unbounded: bool = False,
+) -> str:
     """Return a note's content with a structured metadata header."""
     path = resolve_note_path(relative_path, vault)
     if not path.exists():
         raise FileNotFoundError(f"Note not found: {relative_path}")
-    return _format_note(relative_path, path.read_text())
+    return _format_note(
+        relative_path, path.read_text(), offset=offset, limit=limit, unbounded=unbounded
+    )
 
 
-def get_note_by_title(title: str, vault: Path, cache=None) -> str:
+def get_note_by_title(
+    title: str,
+    vault: Path,
+    cache=None,
+    offset: int = 0,
+    limit: int | None = None,
+    unbounded: bool = False,
+) -> str:
     """Find a note by its frontmatter title and return formatted content.
 
     Raises FileNotFoundError if no match, ValueError if multiple matches.
@@ -70,7 +163,9 @@ def get_note_by_title(title: str, vault: Path, cache=None) -> str:
         if not rel:
             raise FileNotFoundError(f"No note found with title: {title!r}")
         path = vault / rel
-        return _format_note(rel, path.read_text())
+        return _format_note(
+            rel, path.read_text(), offset=offset, limit=limit, unbounded=unbounded
+        )
 
     from alaya.vault import iter_vault_md as _iter_vault_md
     title_lower = title.lower()
@@ -93,7 +188,9 @@ def get_note_by_title(title: str, vault: Path, cache=None) -> str:
 
     md_file, content = matches[0]
     relative_path = str(md_file.relative_to(vault))
-    return _format_note(relative_path, content)
+    return _format_note(
+        relative_path, content, offset=offset, limit=limit, unbounded=unbounded
+    )
 
 
 def list_notes(
@@ -279,19 +376,37 @@ def preview_reindex(vault: Path, force: bool) -> str:
 
 def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
     @mcp.tool()
-    def get_note_tool(path: str = "", title: str = "") -> str:
-        """Read a note. Provide exactly one of path (relative path) or title (frontmatter title)."""
+    def get_note_tool(
+        path: str = "",
+        title: str = "",
+        offset: int = 0,
+        limit: int = 0,
+        unbounded: bool = False,
+    ) -> str:
+        """Read a note. Provide exactly one of path (relative path) or title (frontmatter title).
+
+        Long notes are truncated to the output cap; the response says which line
+        to resume from. Page explicitly with offset (0-based body line) and
+        limit (lines per page), or pass unbounded=True to get the whole note.
+        """
         if path and title:
             return error(INVALID_ARGUMENT, "Provide path or title, not both.")
         if not path and not title:
             return error(INVALID_ARGUMENT, "Either path or title is required.")
         try:
             if title:
-                return get_note_by_title(title, vault, cache=cache)
-            return get_note(path, vault)
+                return get_note_by_title(
+                    title, vault, cache=cache,
+                    offset=offset, limit=limit or None, unbounded=unbounded,
+                )
+            return get_note(
+                path, vault, offset=offset, limit=limit or None, unbounded=unbounded
+            )
         except FileNotFoundError as e:
             return error(NOT_FOUND, str(e))
         except ValueError as e:
+            if "offset" in str(e) or "limit" in str(e):
+                return error(INVALID_ARGUMENT, str(e))
             return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool()
@@ -303,8 +418,12 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         until: str = "",
         recent: int = 0,
         sort: str = "",
+        unbounded: bool = False,
     ) -> str:
-        """List notes. Filter by directory, tag, date range (since/until) or recent N days. Sort by modified/created/title."""
+        """List notes. Filter by directory, tag, date range (since/until) or recent N days. Sort by modified/created/title.
+
+        Output is capped; pass unbounded=True to bypass the cap.
+        """
         try:
             return list_notes(
                 vault,
@@ -331,8 +450,11 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         return get_links(path, vault, backend=backend)
 
     @mcp.tool()
-    def get_tags_tool() -> str:
-        """Return all tags in the vault with note counts."""
+    def get_tags_tool(unbounded: bool = False) -> str:
+        """Return all tags in the vault with note counts.
+
+        Output is capped; pass unbounded=True to bypass the cap.
+        """
         return get_tags(vault, backend=backend)
 
     @mcp.tool()

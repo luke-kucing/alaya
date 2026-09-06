@@ -246,3 +246,132 @@ class TestRejectFlag:
         with patch("alaya.zk.run_zk", return_value=""):
             result = list_notes(vault, tag="kubernetes")
         assert result == "No notes found."
+
+
+class TestGetNotePaging:
+    """offset/limit must page a note so successive calls reconstruct it."""
+
+    def _write(self, vault: Path, lines: int = 120) -> str:
+        note = vault / "ideas" / "long-note.md"
+        body = "\n".join(f"line {i}" for i in range(lines))
+        note.write_text(f"---\ntitle: Long Note\n---\n\n{body}\n")
+        return "ideas/long-note.md"
+
+    def _body_of(self, rendered: str) -> list[str]:
+        """Body lines only: drop the header, the footer, and blank padding."""
+        after = rendered.split("\n---\n", 1)[1]
+        out = []
+        for line in after.strip().splitlines():
+            if line.startswith("…["):
+                break
+            if line.strip():
+                out.append(line)
+        return out
+
+    def test_offset_skips_leading_lines(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault)
+        out = get_note(path, vault, offset=10, limit=5)
+        assert self._body_of(out) == [f"line {i}" for i in range(10, 15)]
+
+    def test_reports_the_line_range(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault)
+        out = get_note(path, vault, offset=10, limit=5)
+        assert "**Lines:** 10-15 of 120" in out
+
+    def test_points_at_the_next_page(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault)
+        out = get_note(path, vault, offset=0, limit=5)
+        assert 'get_note(path="ideas/long-note.md", offset=5)' in out
+
+    def test_last_page_has_no_continuation_marker(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault, lines=10)
+        out = get_note(path, vault, offset=5, limit=5)
+        assert "more line(s)" not in out
+
+    def test_round_trip_reconstructs_the_note(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault)
+        collected: list[str] = []
+        offset, page = 0, 25
+        while True:
+            rendered = get_note(path, vault, offset=offset, limit=page)
+            body = self._body_of(rendered)
+            if not body:
+                break
+            collected += body
+            offset += len(body)
+            if "more line(s)" not in rendered:
+                break
+
+        assert collected == [f"line {i}" for i in range(120)]
+
+    def test_negative_offset_rejected(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault)
+        with pytest.raises(ValueError, match="offset"):
+            get_note(path, vault, offset=-1)
+
+    def test_zero_limit_rejected(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault)
+        with pytest.raises(ValueError, match="limit"):
+            get_note(path, vault, limit=0)
+
+    def test_offset_past_end_returns_no_body(self, vault: Path) -> None:
+        from alaya.tools.read import get_note
+
+        path = self._write(vault, lines=5)
+        assert self._body_of(get_note(path, vault, offset=99)) == []
+
+
+class TestGetNoteCap:
+    def test_long_note_is_truncated_with_a_resume_offset(
+        self, vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from alaya.tools.read import get_note
+
+        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "200")
+        note = vault / "ideas" / "huge.md"
+        note.write_text("---\ntitle: Huge\n---\n\n" + "\n".join(f"filler line {i}" for i in range(500)))
+
+        out = get_note("ideas/huge.md", vault)
+        assert "line(s) truncated" in out
+        assert 'get_note(path="ideas/huge.md", offset=' in out
+
+    def test_unbounded_returns_everything(
+        self, vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from alaya.tools.read import get_note
+
+        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "200")
+        note = vault / "ideas" / "huge.md"
+        note.write_text("---\ntitle: Huge\n---\n\n" + "\n".join(f"filler line {i}" for i in range(500)))
+
+        out = get_note("ideas/huge.md", vault, unbounded=True)
+        assert "truncated" not in out
+        assert "filler line 499" in out
+
+    def test_resume_offset_continues_correctly(
+        self, vault: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from alaya.tools.read import get_note
+
+        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "200")
+        note = vault / "ideas" / "huge.md"
+        note.write_text("---\ntitle: Huge\n---\n\n" + "\n".join(f"filler line {i}" for i in range(500)))
+
+        first = get_note("ideas/huge.md", vault)
+        resume = int(first.split("offset=")[1].split(")")[0])
+        second = get_note("ideas/huge.md", vault, offset=resume)
+        assert f"filler line {resume}" in second

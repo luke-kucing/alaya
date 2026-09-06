@@ -111,8 +111,11 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         return capture_to_inbox(text, vault)
 
     @mcp.tool()
-    def get_inbox_tool() -> str:
-        """Return the current inbox contents."""
+    def get_inbox_tool(unbounded: bool = False) -> str:
+        """Return the current inbox contents.
+
+        Output is capped; pass unbounded=True to bypass the cap.
+        """
         return get_inbox(vault)
 
     @mcp.tool()

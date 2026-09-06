@@ -251,6 +251,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         hyde: bool = False,
         include_types: list[str] | None = None,
         exclude_types: list[str] | None = None,
+        unbounded: bool = False,
     ) -> str:
         """Search notes by keyword or semantic query. Filter by directory, tags, or since date.
 

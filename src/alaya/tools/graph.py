@@ -118,10 +118,13 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
     _link_res = backend.config.link_resolution if backend else LinkResolution.TITLE
 
     @mcp.tool()
-    def vault_graph_tool(directory: str = "", max_nodes: int = 200) -> str:
+    def vault_graph_tool(
+        directory: str = "", max_nodes: int = 200, unbounded: bool = False
+    ) -> str:
         """Return the vault's wikilink graph as JSON. Finds orphan notes and hub topics.
 
         directory: limit to notes under this directory (optional).
+        unbounded: bypass the output cap (optional).
         max_nodes: cap on nodes scanned (default 200).
         """
         return vault_graph(vault, directory=directory, max_nodes=max_nodes, link_resolution=_link_res, cache=cache)
