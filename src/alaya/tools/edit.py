@@ -7,6 +7,7 @@ from alaya.vault import resolve_note_path
 from alaya.tools.write import create_note
 from alaya.tools._locks import get_path_lock, atomic_write
 from alaya.confirm import ConfirmError, guard
+from alaya.events import emit, NoteEvent, EventType
 
 
 def _parse_sections(content: str) -> list[tuple[str, int, int]]:
@@ -64,6 +65,8 @@ def replace_section(
         new_lines = before + [header_line, new_content] + ([""] if after else []) + after
         atomic_write(path, "\n".join(new_lines) + "\n")
 
+    emit(NoteEvent(EventType.MODIFIED, str(path.relative_to(vault.resolve()))))
+
 
 def extract_section(
     source: str,
@@ -120,6 +123,7 @@ def extract_section(
         new_lines = before + [header_line, f"[[{link_key}]]"] + ([""] if after else []) + after
         atomic_write(path, "\n".join(new_lines) + "\n")
 
+    emit(NoteEvent(EventType.MODIFIED, str(path.relative_to(vault.resolve()))))
     return new_path
 
 
