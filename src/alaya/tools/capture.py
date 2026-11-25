@@ -209,7 +209,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         _daily_dir = "daily"
         _default_capture = "ideas"
 
-    @mcp.tool()
+    @mcp.tool(name="smart_capture")
     def smart_capture_tool(
         text: str,
         intent: str = "",

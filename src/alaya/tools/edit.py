@@ -157,7 +157,7 @@ def preview_replace_section(relative_path: str, section: str, new_content: str, 
 
 
 def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
-    @mcp.tool()
+    @mcp.tool(name="replace_section")
     def replace_section_tool(
         path: str, section: str, new_content: str, confirm_token: str = ""
     ) -> str:
@@ -168,7 +168,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         """
         try:
             proposal = guard(
-                "replace_section_tool",
+                "replace_section",
                 {"path": path, "section": section, "new_content": new_content},
                 confirm_token,
                 lambda: preview_replace_section(path, section, new_content, vault),
@@ -187,7 +187,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
                 return error(SECTION_NOT_FOUND, msg)
             return error(OUTSIDE_VAULT, msg)
 
-    @mcp.tool()
+    @mcp.tool(name="extract_section")
     def extract_section_tool(source: str, section: str, new_title: str, new_directory: str) -> str:
         """Extract a ## section into a new note, leaving a wikilink in the original."""
         try:

@@ -1,55 +1,49 @@
-"""Tests that all expected tools are registered on the FastMCP server."""
-import pytest
+"""Tests that every tool is registered under its bare, README-documented name (#150)."""
+import re
 from pathlib import Path
 
+import pytest
 from fastmcp import FastMCP
-from alaya.tools import read, write, inbox, search, structure, edit, tasks, external, ingest, memory
+
+from alaya.tools import (
+    capture, edit, enrich, external, graph, inbox, ingest,
+    memory, read, search, stats, structure, tasks, write,
+)
+
+EXPECTED = {
+    # read & navigate
+    "get_note", "list_notes", "get_backlinks", "get_links", "get_tags",
+    "find_references", "vault_graph", "vault_stats",
+    # write & capture
+    "create_note", "append_to_note", "update_tags", "smart_capture",
+    "capture_to_inbox", "get_inbox", "clear_inbox_item",
+    # search & enrichment
+    "search_notes", "enrich_chunk_context", "store_propositions", "store_summary",
+    # agent memory
+    "memory_recall", "memory_checkpoint", "memory_resume", "memory_supersede", "memory_stale",
+    # tasks
+    "get_todos", "complete_todo",
+    "create_task", "ready_tasks", "claim_task", "renew_task", "release_task",
+    # edit & structure
+    "move_note", "rename_note", "delete_note", "replace_section", "extract_section",
+    # ingest & external
+    "ingest", "batch_ingest", "reindex_vault", "pull_external", "push_external",
+}
 
 
 @pytest.mark.asyncio
 async def test_all_expected_tools_registered(vault: Path) -> None:
-    # create a fresh mcp instance and register all tools against the vault fixture
-    test_mcp = FastMCP(name="alaya-test")
-    read._register(test_mcp, vault)
-    write._register(test_mcp, vault)
-    inbox._register(test_mcp, vault)
-    search._register(test_mcp, vault)
-    structure._register(test_mcp, vault)
-    edit._register(test_mcp, vault)
-    tasks._register(test_mcp, vault)
-    external._register(test_mcp, vault)
-    ingest._register(test_mcp, vault)
-    memory._register(test_mcp, vault)
+    mcp = FastMCP(name="alaya-test")
+    for mod in (read, search, structure, edit, graph, capture, external,
+                write, inbox, tasks, ingest, stats, enrich, memory):
+        mod._register(mcp, vault)
 
-    registered = {t.name for t in await test_mcp.list_tools()}
-    expected = {
-        "get_note_tool",
-        "list_notes_tool",
-        "get_backlinks_tool",
-        "get_links_tool",
-        "get_tags_tool",
-        "reindex_vault_tool",
-        "create_note_tool",
-        "append_to_note_tool",
-        "update_tags_tool",
-        "capture_to_inbox_tool",
-        "get_inbox_tool",
-        "clear_inbox_item_tool",
-        "search_notes_tool",
-        "move_note_tool",
-        "rename_note_tool",
-        "delete_note_tool",
-        "find_references_tool",
-        "replace_section_tool",
-        "extract_section_tool",
-        "get_todos_tool",
-        "complete_todo_tool",
-        "pull_external_tool",
-        "push_external_tool",
-        "ingest_tool",
-        "memory_recall_tool",
-        "memory_checkpoint_tool",
-        "memory_resume_tool",
-    }
-    missing = expected - registered
-    assert not missing, f"Tools not registered: {missing}"
+    registered = {t.name for t in await mcp.list_tools()}
+    assert registered == EXPECTED
+
+
+def test_every_tool_is_documented_in_readme() -> None:
+    readme = (Path(__file__).parents[2] / "README.md").read_text()
+    documented = set(re.findall(r"^\| `(\w+)` \|", readme, re.MULTILINE))
+    # vault_health is registered by server.py, not a tool module
+    assert EXPECTED | {"vault_health"} <= documented

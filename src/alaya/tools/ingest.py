@@ -286,7 +286,7 @@ def batch_ingest(
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path) -> None:
-    @mcp.tool()
+    @mcp.tool(name="ingest")
     def ingest_tool(
         source: str,
         title: str = "",
@@ -312,7 +312,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
             f"{links_section}"
         )
 
-    @mcp.tool()
+    @mcp.tool(name="batch_ingest")
     def batch_ingest_tool(sources: list[str], tags: list[str] | None = None) -> str:
         """Ingest multiple URLs, PDFs, or markdown files in one call. Per-source errors don't abort the batch."""
         return batch_ingest(sources, tags=tags or [], vault=vault)

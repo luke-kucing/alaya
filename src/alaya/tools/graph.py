@@ -117,7 +117,7 @@ def vault_graph(
 def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
     _link_res = backend.config.link_resolution if backend else LinkResolution.TITLE
 
-    @mcp.tool()
+    @mcp.tool(name="vault_graph")
     def vault_graph_tool(
         directory: str = "", max_nodes: int = 200, unbounded: bool = False
     ) -> str:

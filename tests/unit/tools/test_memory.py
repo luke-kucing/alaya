@@ -408,17 +408,17 @@ class TestRegistration:
         memory._register(test_mcp, vault, backend=backend)
         names = {t.name for t in await test_mcp.list_tools()}
         assert names == {
-            "memory_recall_tool",
-            "memory_checkpoint_tool",
-            "memory_resume_tool",
-            "memory_supersede_tool",
-            "memory_stale_tool",
+            "memory_recall",
+            "memory_checkpoint",
+            "memory_resume",
+            "memory_supersede",
+            "memory_stale",
         }
 
     @pytest.mark.asyncio
     async def test_invalid_argument_returns_error_string(self, vault: Path, backend) -> None:
         test_mcp = FastMCP(name="alaya-test")
         memory._register(test_mcp, vault, backend=backend)
-        tool = {t.name: t for t in await test_mcp.list_tools()}["memory_checkpoint_tool"]
+        tool = {t.name: t for t in await test_mcp.list_tools()}["memory_checkpoint"]
         out = tool.fn(session_id="../nope", agent="a", summary_md="s")
         assert out.startswith("ERROR [")

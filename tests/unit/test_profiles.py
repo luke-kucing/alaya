@@ -17,23 +17,23 @@ from alaya.profiles import (
 )
 
 REGISTERED = {
-    "search_notes_tool",
-    "get_note_tool",
-    "list_notes_tool",
-    "get_backlinks_tool",
-    "get_links_tool",
-    "get_tags_tool",
-    "vault_stats_tool",
-    "create_note_tool",
-    "delete_note_tool",
-    "memory_recall_tool",
+    "search_notes",
+    "get_note",
+    "list_notes",
+    "get_backlinks",
+    "get_links",
+    "get_tags",
+    "vault_stats",
+    "create_note",
+    "delete_note",
+    "memory_recall",
     "vault_health",
 }
 
 
 class TestCanonical:
     def test_strips_tool_suffix(self) -> None:
-        assert _canonical("search_notes_tool") == "search_notes"
+        assert _canonical("search_notes") == "search_notes"
 
     def test_leaves_unsuffixed_names_alone(self) -> None:
         assert _canonical("vault_health") == "vault_health"
@@ -62,13 +62,13 @@ class TestResolveProfile:
 
     def test_matches_names_written_without_suffix(self) -> None:
         keep = resolve_profile("readonly", REGISTERED)
-        assert "search_notes_tool" in keep
-        assert "get_note_tool" in keep
+        assert "search_notes" in keep
+        assert "get_note" in keep
 
     def test_excludes_tools_outside_the_profile(self) -> None:
         keep = resolve_profile("readonly", REGISTERED)
-        assert "delete_note_tool" not in keep
-        assert "create_note_tool" not in keep
+        assert "delete_note" not in keep
+        assert "create_note" not in keep
 
     def test_unknown_profile_raises_and_names_known_ones(self) -> None:
         with pytest.raises(ProfileError) as exc:
@@ -87,8 +87,8 @@ class TestResolveProfile:
     def test_suffixed_names_in_a_profile_also_match(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setitem(BUILTIN_PROFILES, "suffixed", ["search_notes_tool"])
-        assert resolve_profile("suffixed", REGISTERED) == {"search_notes_tool"}
+        monkeypatch.setitem(BUILTIN_PROFILES, "suffixed", ["search_notes"])
+        assert resolve_profile("suffixed", REGISTERED) == {"search_notes"}
 
 
 class TestLoadProfiles:
@@ -141,8 +141,8 @@ class TestApplyProfile:
         remaining = {t.name for t in await mcp.list_tools()}
 
         assert remaining == keep
-        assert "search_notes_tool" in remaining
-        assert "create_note_tool" not in remaining
+        assert "search_notes" in remaining
+        assert "create_note" not in remaining
 
     @pytest.mark.asyncio
     async def test_librarian_removes_nothing(self, vault: Path) -> None:
@@ -195,10 +195,8 @@ class TestBuiltinProfileContents:
             resolve_profile(name, registered)
         # The gardener (#172) gets exactly its upkeep tools.
         assert resolve_profile("gardener", registered) == {
-            f"{t}_tool" for t in (
-                "memory_stale", "get_note", "memory_supersede", "memory_checkpoint",
-                "store_summary", "append_to_note", "delete_note",
-            )
+            "memory_stale", "get_note", "memory_supersede", "memory_checkpoint",
+            "store_summary", "append_to_note", "delete_note",
         }
 
     def test_orchestrator_is_a_small_surface(self) -> None:

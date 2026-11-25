@@ -570,7 +570,7 @@ def _linked_notes(content: str, vault: Path, backend=None) -> list[tuple[str, st
 # --- FastMCP tool registration ---------------------------------------------
 
 def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
-    @mcp.tool()
+    @mcp.tool(name="memory_recall")
     def memory_recall_tool(
         query: str,
         budget_tokens: int = DEFAULT_RECALL_BUDGET,
@@ -601,7 +601,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="memory_checkpoint")
     def memory_checkpoint_tool(
         session_id: str,
         agent: str,
@@ -633,7 +633,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
             return error(INVALID_ARGUMENT, str(e))
         return f"Checkpoint saved: {path}"
 
-    @mcp.tool()
+    @mcp.tool(name="memory_stale")
     def memory_stale_tool(scope: str = "", limit: int = 50, budget_tokens: int = DEFAULT_STALE_BUDGET) -> str:
         """Find agent memory that needs upkeep: expired (past ttl_days),
         low_confidence, near_duplicates (similar embeddings) and orphans (no
@@ -646,7 +646,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="memory_supersede")
     def memory_supersede_tool(old: str, new: str, reason: str = "") -> str:
         """Mark note old as replaced by note new, keeping both for history.
 
@@ -661,7 +661,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="memory_resume")
     def memory_resume_tool(
         session_id: str,
         budget_tokens: int = DEFAULT_RESUME_BUDGET,

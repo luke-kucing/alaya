@@ -248,6 +248,10 @@ Query ──▶ Router ──▶ Retrieval ──▶ Correction ──▶ Expans
 
 ## Tools
 
+Tool names are registered exactly as listed below. Before #150 they carried a
+`_tool` suffix (`search_notes_tool`); clients that allowlist tools by name need
+updating. Profiles accept either spelling.
+
 ### Read & navigate
 
 | Tool | Purpose |
@@ -278,6 +282,9 @@ Query ──▶ Router ──▶ Retrieval ──▶ Correction ──▶ Expans
 | Tool | Purpose |
 |---|---|
 | `search_notes` | Hybrid semantic + keyword search with adaptive routing, corrective RAG, and optional reranking/graph expansion/HyDE |
+| `enrich_chunk_context` | Store LLM-written context for one chunk to sharpen its retrieval |
+| `store_propositions` | Store atomic factual statements extracted from a note as extra searchable chunks |
+| `store_summary` | Store a summary spanning several related notes as a searchable entry (RAPTOR-style) |
 
 Notes carrying frontmatter `type: agent-memory` are excluded from `search_notes`
 by default so agent scratch memory cannot crowd out curated notes. Pass
@@ -404,7 +411,7 @@ would change plus a `confirm_token`; the second call, with that token, executes.
 
 ```
 delete_note(path="projects/old.md")
-  -> CONFIRM REQUIRED — delete_note_tool
+  -> CONFIRM REQUIRED — delete_note
      Archive `projects/old.md` -> `archives/old.md` (soft delete, the file is moved not erased)
      2 note(s) link to this one and will be left with broken links: …
      confirm_token="1757193042.a1b2…"
@@ -438,6 +445,11 @@ propose and execute entries share a `confirm_id` in the audit log.
 | `find_references` | Find wikilinks and text mentions of a title |
 | `get_todos` | Find all `- [ ]` tasks across the vault |
 | `complete_todo` | Mark a task complete (fuzzy line fallback) |
+| `create_task` | Add a task note to the ledger (`tasks/`), optionally blocked by other tasks |
+| `ready_tasks` | List open, unclaimed (or lease-expired) tasks whose blockers are done |
+| `claim_task` | Claim a task with a lease; exactly one concurrent claimer wins |
+| `renew_task` | Extend the lease on a task you hold |
+| `release_task` | Release a held task as done, open or blocked |
 
 ### Ingest & external
 
@@ -568,7 +580,7 @@ default_external_dir = "external"
 
 [profiles]
 # Custom tool profiles. "*" means every tool. Names may be written with or
-# without the `_tool` suffix. A profile of the same name overrides a built-in.
+# with or without the legacy `_tool` suffix. A profile of the same name overrides a built-in.
 planner = ["memory_recall", "memory_resume", "search_notes", "get_note"]
 ```
 

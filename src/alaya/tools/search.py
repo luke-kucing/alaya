@@ -239,7 +239,7 @@ def search_notes(
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
-    @mcp.tool()
+    @mcp.tool(name="search_notes")
     def search_notes_tool(
         query: str,
         directory: str = "",

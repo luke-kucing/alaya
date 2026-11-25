@@ -279,7 +279,7 @@ def preview_delete(relative_path: str, vault: Path, reason: str | None = None,
 def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
     _archives = backend.config.archives_dir if backend else _DEFAULT_ARCHIVES_DIR
 
-    @mcp.tool()
+    @mcp.tool(name="move_note")
     def move_note_tool(path: str, destination: str, confirm_token: str = "") -> str:
         """Move a note to a different directory. Returns the new path.
 
@@ -288,7 +288,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         """
         try:
             proposal = guard(
-                "move_note_tool", {"path": path, "destination": destination}, confirm_token,
+                "move_note", {"path": path, "destination": destination}, confirm_token,
                 lambda: preview_move(path, destination, vault),
             )
             if proposal:
@@ -303,7 +303,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         except ValueError as e:
             return error(OUTSIDE_VAULT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="rename_note")
     def rename_note_tool(path: str, new_title: str, confirm_token: str = "") -> str:
         """Rename a note and update all wikilinks referencing it. Returns the new path.
 
@@ -312,7 +312,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         """
         try:
             proposal = guard(
-                "rename_note_tool", {"path": path, "new_title": new_title}, confirm_token,
+                "rename_note", {"path": path, "new_title": new_title}, confirm_token,
                 lambda: preview_rename(path, new_title, vault, backend=backend),
             )
             if proposal:
@@ -327,7 +327,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         except ValueError as e:
             return error(OUTSIDE_VAULT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="delete_note")
     def delete_note_tool(path: str, reason: str = "", confirm_token: str = "") -> str:
         """Soft-delete a note by moving it to archives/.
 
@@ -336,7 +336,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         """
         try:
             proposal = guard(
-                "delete_note_tool", {"path": path, "reason": reason}, confirm_token,
+                "delete_note", {"path": path, "reason": reason}, confirm_token,
                 lambda: preview_delete(path, vault, reason=reason or None, archives_dir=_archives),
             )
             if proposal:
@@ -349,7 +349,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="find_references")
     def find_references_tool(
         title: str, include_text_mentions: bool = False, unbounded: bool = False
     ) -> str:

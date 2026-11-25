@@ -178,7 +178,7 @@ class TestCheckDuplicates:
         dupe = [{"title": "Near Dup", "path": "dup.md", "score": 0.92, "directory": "ideas", "text": "x"}]
         with patch("alaya.tools.write._check_duplicates", return_value=dupe):
             import asyncio
-            result = asyncio.run(test_mcp.call_tool("create_note_tool", {
+            result = asyncio.run(test_mcp.call_tool("create_note", {
                 "title": "Near Dup", "directory": "ideas", "tags": [], "confirm": False,
             }))
         assert "WARNING" in str(result)
@@ -193,7 +193,7 @@ class TestCheckDuplicates:
         dupe = [{"title": "Near Dup", "path": "dup.md", "score": 0.92, "directory": "ideas", "text": "x"}]
         with patch("alaya.tools.write._check_duplicates", return_value=dupe):
             import asyncio
-            result = asyncio.run(test_mcp.call_tool("create_note_tool", {
+            result = asyncio.run(test_mcp.call_tool("create_note", {
                 "title": "Unique Enough", "directory": "ideas", "tags": [], "confirm": True,
             }))
         # Should create the note, not warn

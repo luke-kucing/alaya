@@ -152,7 +152,7 @@ def _find_note_by_url(url: str, vault: Path) -> str | None:
 def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
     _default_dir = backend.config.default_external_dir if backend else "projects"
 
-    @mcp.tool()
+    @mcp.tool(name="pull_external")
     def pull_external_tool(
         source: str,
         directory: str = "",
@@ -164,7 +164,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         """
         return pull_external(source, directory or _default_dir, tags or [], vault)
 
-    @mcp.tool()
+    @mcp.tool(name="push_external")
     def push_external_tool(
         note_path: str,
         target: str,

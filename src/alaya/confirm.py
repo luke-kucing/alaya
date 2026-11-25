@@ -3,7 +3,7 @@
 The README's position has been that "confirmation lives in Claude, not the
 server". That holds for Claude Code, which prompts before a destructive tool
 call. It does not hold for an arbitrary MCP client — an agent loop will happily
-call ``delete_note_tool`` with no human anywhere in the path.
+call ``delete_note`` with no human anywhere in the path.
 
 So destructive tools become two-phase:
 

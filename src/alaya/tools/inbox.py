@@ -105,12 +105,12 @@ def preview_clear_inbox_item(text: str, vault: Path) -> str:
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path) -> None:
-    @mcp.tool()
+    @mcp.tool(name="capture_to_inbox")
     def capture_to_inbox_tool(text: str) -> str:
         """Capture a quick note to inbox.md with a timestamp."""
         return capture_to_inbox(text, vault)
 
-    @mcp.tool()
+    @mcp.tool(name="get_inbox")
     def get_inbox_tool(unbounded: bool = False) -> str:
         """Return the current inbox contents.
 
@@ -118,7 +118,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         """
         return get_inbox(vault)
 
-    @mcp.tool()
+    @mcp.tool(name="clear_inbox_item")
     def clear_inbox_item_tool(text: str, confirm_token: str = "") -> str:
         """Remove an inbox item by matching text.
 
@@ -127,7 +127,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         """
         try:
             proposal = guard(
-                "clear_inbox_item_tool", {"text": text}, confirm_token,
+                "clear_inbox_item", {"text": text}, confirm_token,
                 lambda: preview_clear_inbox_item(text, vault),
             )
             if proposal:

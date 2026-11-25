@@ -246,7 +246,7 @@ def _slugify(text: str) -> str:
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path) -> None:
-    @mcp.tool()
+    @mcp.tool(name="enrich_chunk_context")
     def enrich_chunk_context_tool(
         path: str,
         chunk_index: int,
@@ -264,7 +264,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         """
         return enrich_chunk_context(path, chunk_index, context, vault)
 
-    @mcp.tool()
+    @mcp.tool(name="store_propositions")
     def store_propositions_tool(
         path: str,
         propositions: list[str],
@@ -280,7 +280,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         """
         return store_propositions(path, propositions, vault)
 
-    @mcp.tool()
+    @mcp.tool(name="store_summary")
     def store_summary_tool(
         paths: list[str],
         summary: str,
