@@ -38,6 +38,41 @@ class TestSearchNotesHybrid:
         assert "0.87" in result
 
 
+class TestSearchSnippets:
+    """#145: indexed hits carry chunk text so agents can ground without get_note."""
+
+    def _search(self, vault: Path, results: list[dict]) -> str:
+        with patch("alaya.tools.search._hybrid_search_available", return_value=True), \
+             patch("alaya.tools.search._run_corrective_search", return_value=results):
+            return search_notes("q", vault)
+
+    def test_snippet_column_is_flat_and_table_safe(self, vault: Path) -> None:
+        out = self._search(vault, [{"title": "T", "path": "a.md", "score": 0.9,
+                                    "text": "line one\n\n  a | b"}])
+        assert "| Title | Path | Score | Snippet |" in out
+        assert out.splitlines()[-1].endswith("| line one a \\| b |")
+
+    def test_context_prefix_is_stripped(self, vault: Path) -> None:
+        from alaya.index.embedder import chunk_note
+
+        content = (vault / "projects/second-brain.md").read_text()
+        chunk = chunk_note("projects/second-brain.md", content)[0]  # as indexed
+        assert chunk.text.startswith("From note:")
+        out = self._search(vault, [{"title": "T", "path": "a.md", "score": 0.9, "text": chunk.text}])
+        assert "From note:" not in out
+
+    def test_long_chunk_is_truncated(self, vault: Path) -> None:
+        from alaya.tools.search import SNIPPET_CHARS
+
+        out = self._search(vault, [{"title": "T", "path": "a.md", "score": 0.9, "text": "w " * 1000}])
+        snippet = out.splitlines()[-1].split(" | ")[-1]
+        assert snippet.endswith("… |") and len(snippet) <= SNIPPET_CHARS + 4
+
+    def test_graph_expanded_hit_without_text(self, vault: Path) -> None:
+        out = self._search(vault, [{"title": "T", "path": "a.md", "score": 0.5}])
+        assert out.splitlines()[-1] == "| [[T]] | `a.md` | 0.50 |  |"
+
+
 class TestReindexVault:
     def test_requires_confirm(self, vault: Path) -> None:
         result = reindex_vault(vault, confirm=False)
