@@ -1,4 +1,5 @@
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -32,3 +33,20 @@ def large_vault(tmp_path_factory: pytest.TempPathFactory) -> Path:
     vault_path = tmp_path_factory.mktemp("large_vault") / "notes"
     shutil.copytree(VAULT_FIXTURE_LARGE_PATH, vault_path)
     return vault_path
+
+
+@pytest.fixture
+def wait_until():
+    """Poll pred() until true or timeout, then optionally settle; returns pred().
+
+    For assertions on background threads/timers: a fixed sleep flakes on a
+    loaded CI runner, a deadline doesn't. settle catches spurious extra calls.
+    """
+    def _wait(pred, timeout: float = 5.0, settle: float = 0.0):
+        deadline = time.monotonic() + timeout
+        while not pred() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if settle:
+            time.sleep(settle)
+        return pred()
+    return _wait
