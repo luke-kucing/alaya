@@ -94,48 +94,7 @@ class TestParseArgs:
 
 
 class TestResponseShaping:
-    """The instrumentation wrapper must cap and annotate every tool response."""
-
-    def _wrap(self, vault: Path, fn, name: str, kwargs: dict):
-        """Run fn through the same shaping the server wrapper applies."""
-        from alaya.responses import shape
-        from alaya.server import _TRUNCATION_HINTS
-
-        return shape(
-            fn(**kwargs),
-            unbounded=bool(kwargs.get("unbounded")),
-            hint=_TRUNCATION_HINTS.get(name),
-        )
-
-    def test_every_response_carries_a_token_count(self, vault: Path) -> None:
-        from alaya.tools.read import get_note
-
-        out = self._wrap(
-            vault,
-            lambda **_: get_note("projects/second-brain.md", vault),
-            "get_note",
-            {},
-        )
-        assert "<!-- token_count:" in out
-
-    def test_cap_applies_with_a_tool_specific_hint(
-        self, vault: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
-        out = self._wrap(
-            vault, lambda **_: "word " * 2000, "search_notes", {}
-        )
-        assert "truncated" in out
-        assert "narrow the query" in out
-
-    def test_unbounded_kwarg_bypasses_the_cap(
-        self, vault: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
-        out = self._wrap(
-            vault, lambda **_: "word " * 2000, "search_notes", {"unbounded": True}
-        )
-        assert "truncated" not in out
+    """Shaping helpers; the end-to-end path is covered by TestToolMiddleware."""
 
     def test_memory_recall_token_count_is_not_duplicated(self, vault: Path) -> None:
         from alaya.responses import shape
@@ -218,3 +177,70 @@ class TestHttpTransport:
         server._configure_http_auth("0.0.0.0")
         assert "ALAYA_HTTP_TOKEN" in caplog.text
         assert server.mcp.auth is None
+
+
+# --- Tool middleware: shaping + audit (#153) ---
+
+
+class TestToolMiddleware:
+    # whatever search_notes is registered as, so this survives tool renames (#150)
+    from alaya.server import _TRUNCATION_HINTS as HINTS
+    HINTED = next(k for k in HINTS if k.startswith("search_notes"))
+
+    def _server(self, tmp_path: Path):
+        from fastmcp import FastMCP
+        from alaya.server import _ToolMiddleware
+
+        mcp = FastMCP(name="alaya-test")
+        mcp.add_middleware(_ToolMiddleware(tmp_path, tmp_path / "audit.jsonl"))
+
+        @mcp.tool(name=self.HINTED)
+        def search(query: str, unbounded: bool = False) -> str:
+            return "word " * 2000
+
+        @mcp.tool
+        def boom(path: str) -> str:
+            raise RuntimeError("disk on fire")
+
+        return mcp
+
+    def _audit(self, tmp_path: Path) -> list[dict]:
+        import json
+
+        return [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+
+    def _call(self, mcp, name: str, args: dict, raise_on_error: bool = True):
+        import asyncio
+        from fastmcp import Client
+
+        async def go():
+            async with Client(mcp) as c:
+                return await c.call_tool(name, args, raise_on_error=raise_on_error)
+
+        return asyncio.run(go())
+
+    def test_caps_text_and_structured_result(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
+        r = self._call(self._server(tmp_path), self.HINTED, {"query": "q"})
+        text = r.content[0].text
+        assert "truncated" in text and self.HINTS[self.HINTED] in text and "<!-- token_count:" in text
+        assert r.structured_content == {"result": text}
+        [entry] = self._audit(tmp_path)
+        assert entry["tool"] == self.HINTED and entry["status"] == "ok"
+
+    def test_unbounded_bypasses_cap(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
+        r = self._call(self._server(tmp_path), self.HINTED, {"query": "q", "unbounded": True})
+        assert "truncated" not in r.content[0].text
+
+    def test_exception_is_audited_as_error(self, tmp_path: Path) -> None:
+        r = self._call(self._server(tmp_path), "boom", {"path": "x"}, raise_on_error=False)
+        assert r.is_error
+        [entry] = self._audit(tmp_path)
+        assert entry["tool"] == "boom" and entry["status"] == "error"
+        assert "disk on fire" in entry["summary"]
+
+    def test_validation_failure_is_audited(self, tmp_path: Path) -> None:
+        r = self._call(self._server(tmp_path), "boom", {}, raise_on_error=False)
+        assert r.is_error
+        assert self._audit(tmp_path)[0]["status"] == "error"
