@@ -346,7 +346,7 @@ def _ledger_errors(fn):
 
 
 def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
-    @mcp.tool()
+    @mcp.tool(name="create_task")
     def create_task_tool(title: str, body: str = "", blocked_by: list[str] | None = None) -> str:
         """Add a task to the shared task ledger (one note under tasks/).
 
@@ -355,14 +355,14 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         return _ledger_errors(lambda: "Created: " + _format_task(
             create_task(title, vault, body=body, blocked_by=blocked_by, backend=backend)))
 
-    @mcp.tool()
+    @mcp.tool(name="ready_tasks")
     def ready_tasks_tool(limit: int = 20) -> str:
         """List ledger tasks an agent can claim now: open with all blockers done,
         or claimed under a lease that has run out."""
         tasks = ready_tasks(vault, limit=limit, backend=backend)
         return "\n".join(map(_format_task, tasks)) or "No ready tasks."
 
-    @mcp.tool()
+    @mcp.tool(name="claim_task")
     def claim_task_tool(task: str, owner: str, lease_minutes: int = 60) -> str:
         """Claim a ledger task for owner (your agent or session id) for lease_minutes.
 
@@ -372,13 +372,13 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         return _ledger_errors(lambda: "Claimed: " + _format_task(
             claim_task(task, owner, vault, lease_minutes=lease_minutes, backend=backend)))
 
-    @mcp.tool()
+    @mcp.tool(name="renew_task")
     def renew_task_tool(task: str, owner: str, lease_minutes: int = 60) -> str:
         """Extend your lease on a ledger task you claimed."""
         return _ledger_errors(lambda: "Renewed: " + _format_task(
             renew_task(task, owner, vault, lease_minutes=lease_minutes, backend=backend)))
 
-    @mcp.tool()
+    @mcp.tool(name="release_task")
     def release_task_tool(task: str, owner: str, status: str = "done", note: str = "") -> str:
         """Release your claim on a ledger task, marking it done, open or blocked.
 
@@ -387,7 +387,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         return _ledger_errors(lambda: "Released: " + _format_task(
             release_task(task, owner, vault, status=status, note=note, backend=backend)))
 
-    @mcp.tool()
+    @mcp.tool(name="get_todos")
     def get_todos_tool(
         directories: list[str] | None = None, unbounded: bool = False
     ) -> str:
@@ -401,7 +401,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
         lines = [f"- `{t['path']}:{t['line']}` — {t['text']}" for t in todos]
         return "\n".join(lines)
 
-    @mcp.tool()
+    @mcp.tool(name="complete_todo")
     def complete_todo_tool(path: str, line: int, task_text: str) -> str:
         """Mark a task as complete. Uses fuzzy fallback if line number is stale."""
         try:

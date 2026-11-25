@@ -275,7 +275,7 @@ def update_tags(relative_path: str, add: list[str], remove: list[str], vault: Pa
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path) -> None:
-    @mcp.tool()
+    @mcp.tool(name="create_note")
     def create_note_tool(
         title: str,
         directory: str,
@@ -307,7 +307,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="append_to_note")
     def append_to_note_tool(
         path: str,
         text: str,
@@ -332,7 +332,7 @@ def _register(mcp: FastMCP, vault: Path) -> None:
                 return _err(SECTION_NOT_FOUND, msg)
             return error(OUTSIDE_VAULT, msg)
 
-    @mcp.tool()
+    @mcp.tool(name="update_tags")
     def update_tags_tool(path: str, add: list[str], remove: list[str]) -> str:
         """Add or remove tags on an existing note."""
         try:

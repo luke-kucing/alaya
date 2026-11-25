@@ -375,7 +375,7 @@ def preview_reindex(vault: Path, force: bool) -> str:
 
 
 def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
-    @mcp.tool()
+    @mcp.tool(name="get_note")
     def get_note_tool(
         path: str = "",
         title: str = "",
@@ -409,7 +409,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
                 return error(INVALID_ARGUMENT, str(e))
             return error(OUTSIDE_VAULT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="list_notes")
     def list_notes_tool(
         directory: str = "",
         tag: str = "",
@@ -439,17 +439,17 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
 
-    @mcp.tool()
+    @mcp.tool(name="get_backlinks")
     def get_backlinks_tool(path: str) -> str:
         """Return all notes that link to the given note (backlinks)."""
         return get_backlinks(path, vault, backend=backend)
 
-    @mcp.tool()
+    @mcp.tool(name="get_links")
     def get_links_tool(path: str) -> str:
         """Return all notes that the given note links to (outgoing links)."""
         return get_links(path, vault, backend=backend)
 
-    @mcp.tool()
+    @mcp.tool(name="get_tags")
     def get_tags_tool(unbounded: bool = False) -> str:
         """Return all tags in the vault with note counts.
 
@@ -457,7 +457,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         """
         return get_tags(vault, backend=backend)
 
-    @mcp.tool()
+    @mcp.tool(name="reindex_vault")
     def reindex_vault_tool(
         confirm: bool = False, force: bool = False, confirm_token: str = ""
     ) -> str:
@@ -470,7 +470,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         """
         try:
             proposal = guard(
-                "reindex_vault_tool", {"force": force}, confirm_token,
+                "reindex_vault", {"force": force}, confirm_token,
                 lambda: preview_reindex(vault, force),
             )
         except ConfirmError as e:

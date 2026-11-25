@@ -5,9 +5,9 @@ fraction of the context window, and the size of the decision surface measurably
 hurts tool-call accuracy. A profile trims the exposed set at startup, so every
 client gets the benefit rather than each having to filter for itself.
 
-Profile entries may be written with or without the ``_tool`` suffix that FastMCP
-registration adds (see #150), so ``search_notes`` and ``search_notes_tool`` both
-match the same tool.
+Tools are registered under bare names (``search_notes``). Profile entries may
+still carry the pre-#150 ``_tool`` suffix, so ``search_notes`` and
+``search_notes_tool`` both match the same tool.
 """
 from __future__ import annotations
 

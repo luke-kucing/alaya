@@ -57,36 +57,36 @@ class TestMode:
 class TestTokens:
     def test_round_trip(self) -> None:
         args = {"path": "ideas/a.md"}
-        verify_token("delete_note_tool", args, issue_token("delete_note_tool", args))
+        verify_token("delete_note", args, issue_token("delete_note", args))
 
     def test_rejects_different_args(self) -> None:
-        token = issue_token("delete_note_tool", {"path": "ideas/a.md"})
+        token = issue_token("delete_note", {"path": "ideas/a.md"})
         with pytest.raises(ConfirmError, match="does not match"):
-            verify_token("delete_note_tool", {"path": "ideas/b.md"}, token)
+            verify_token("delete_note", {"path": "ideas/b.md"}, token)
 
     def test_rejects_different_tool(self) -> None:
         args = {"path": "ideas/a.md"}
-        token = issue_token("delete_note_tool", args)
+        token = issue_token("delete_note", args)
         with pytest.raises(ConfirmError, match="does not match"):
-            verify_token("move_note_tool", args, token)
+            verify_token("move_note", args, token)
 
     def test_rejects_expired_token(self) -> None:
         args = {"path": "ideas/a.md"}
-        token = issue_token("delete_note_tool", args, ttl=-1)
+        token = issue_token("delete_note", args, ttl=-1)
         with pytest.raises(ConfirmError, match="expired"):
-            verify_token("delete_note_tool", args, token)
+            verify_token("delete_note", args, token)
 
     @pytest.mark.parametrize("bad", ["", "garbage", "notanumber.abc", "123"])
     def test_rejects_malformed_token(self, bad: str) -> None:
         with pytest.raises(ConfirmError):
-            verify_token("delete_note_tool", {}, bad)
+            verify_token("delete_note", {}, bad)
 
     def test_tampered_signature_rejected(self) -> None:
         args = {"path": "ideas/a.md"}
-        expiry, _, sig = issue_token("delete_note_tool", args).partition(".")
+        expiry, _, sig = issue_token("delete_note", args).partition(".")
         tampered = f"{expiry}.{'0' * len(sig)}"
         with pytest.raises(ConfirmError):
-            verify_token("delete_note_tool", args, tampered)
+            verify_token("delete_note", args, tampered)
 
     def test_arg_order_does_not_matter(self) -> None:
         token = issue_token("t", {"a": 1, "b": 2})
@@ -95,7 +95,7 @@ class TestTokens:
 
 class TestGuard:
     def test_required_mode_returns_a_proposal_first(self) -> None:
-        out = guard("delete_note_tool", {"path": "a"}, "", lambda: "would archive a")
+        out = guard("delete_note", {"path": "a"}, "", lambda: "would archive a")
         assert out is not None
         assert "CONFIRM REQUIRED" in out
         assert "would archive a" in out
@@ -103,35 +103,35 @@ class TestGuard:
 
     def test_valid_token_lets_the_call_through(self) -> None:
         args = {"path": "a"}
-        token = issue_token("delete_note_tool", args)
-        assert guard("delete_note_tool", args, token, lambda: "unused") is None
+        token = issue_token("delete_note", args)
+        assert guard("delete_note", args, token, lambda: "unused") is None
 
     def test_off_mode_never_gates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ALAYA_CONFIRM_MODE", "off")
-        assert guard("delete_note_tool", {"path": "a"}, "", lambda: "unused") is None
+        assert guard("delete_note", {"path": "a"}, "", lambda: "unused") is None
 
     def test_optional_mode_allows_unconfirmed_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ALAYA_CONFIRM_MODE", "optional")
-        assert guard("delete_note_tool", {"path": "a"}, "", lambda: "unused") is None
+        assert guard("delete_note", {"path": "a"}, "", lambda: "unused") is None
 
     def test_optional_mode_still_validates_a_supplied_token(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("ALAYA_CONFIRM_MODE", "optional")
         with pytest.raises(ConfirmError):
-            guard("delete_note_tool", {"path": "a"}, "bogus.token", lambda: "unused")
+            guard("delete_note", {"path": "a"}, "bogus.token", lambda: "unused")
 
     def test_preview_is_not_built_when_not_needed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ALAYA_CONFIRM_MODE", "off")
         calls = []
-        guard("delete_note_tool", {"path": "a"}, "", lambda: calls.append(1) or "x")
+        guard("delete_note", {"path": "a"}, "", lambda: calls.append(1) or "x")
         assert calls == []
 
 
 class TestAuditPairing:
     def test_propose_and_execute_share_an_id(self) -> None:
         args = {"path": "a"}
-        proposal = format_proposal("delete_note_tool", args, "preview")
+        proposal = format_proposal("delete_note", args, "preview")
         propose_id = audit_id_for(args, proposal)
 
         token = proposal.split('confirm_token="')[1].split('"')[0]

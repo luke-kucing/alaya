@@ -101,7 +101,7 @@ def _vault_stats_cached(vault: Path, cache) -> str:
 # --- FastMCP tool registration ---
 
 def _register(mcp: FastMCP, vault: Path, cache=None) -> None:
-    @mcp.tool()
+    @mcp.tool(name="vault_stats")
     def vault_stats_tool() -> str:
         """Return vault statistics: note counts by directory, top tags, and index coverage."""
         return vault_stats(vault, cache=cache)

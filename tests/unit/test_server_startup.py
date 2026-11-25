@@ -113,7 +113,7 @@ class TestResponseShaping:
         out = self._wrap(
             vault,
             lambda **_: get_note("projects/second-brain.md", vault),
-            "get_note_tool",
+            "get_note",
             {},
         )
         assert "<!-- token_count:" in out
@@ -123,7 +123,7 @@ class TestResponseShaping:
     ) -> None:
         monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
         out = self._wrap(
-            vault, lambda **_: "word " * 2000, "search_notes_tool", {}
+            vault, lambda **_: "word " * 2000, "search_notes", {}
         )
         assert "truncated" in out
         assert "narrow the query" in out
@@ -133,7 +133,7 @@ class TestResponseShaping:
     ) -> None:
         monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
         out = self._wrap(
-            vault, lambda **_: "word " * 2000, "search_notes_tool", {"unbounded": True}
+            vault, lambda **_: "word " * 2000, "search_notes", {"unbounded": True}
         )
         assert "truncated" not in out
 

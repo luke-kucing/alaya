@@ -58,13 +58,13 @@ def _register_all(vault: Path, backend=None, cache=None) -> None:
 # How a caller gets the rest of a truncated response, per tool. Tools absent
 # here fall back to the generic footer.
 _TRUNCATION_HINTS = {
-    "search_notes_tool": "narrow the query, lower limit, or pass unbounded=True",
-    "list_notes_tool": "lower limit or pass unbounded=True",
-    "get_todos_tool": "restrict directories or pass unbounded=True",
-    "find_references_tool": "pass unbounded=True",
-    "get_tags_tool": "pass unbounded=True",
-    "get_inbox_tool": "pass unbounded=True",
-    "vault_graph_tool": "lower max_nodes or pass unbounded=True",
+    "search_notes": "narrow the query, lower limit, or pass unbounded=True",
+    "list_notes": "lower limit or pass unbounded=True",
+    "get_todos": "restrict directories or pass unbounded=True",
+    "find_references": "pass unbounded=True",
+    "get_tags": "pass unbounded=True",
+    "get_inbox": "pass unbounded=True",
+    "vault_graph": "lower max_nodes or pass unbounded=True",
 }
 
 
