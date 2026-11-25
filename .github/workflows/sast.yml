@@ -26,7 +26,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -59,7 +59,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Code Scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6  # v3.39.5
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea  # v4.39.4
         with:
           sarif_file: semgrep.sarif
         continue-on-error: true  # SARIF upload requires Code Scanning to be enabled
