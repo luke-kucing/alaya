@@ -332,9 +332,9 @@ class ObsidianBackend:
             if isinstance(val, list):
                 lines.append(f"{key}:")
                 for item in val:
-                    lines.append(f"  - {_yaml_quote(str(item))}")
+                    lines.append(f"  - {_yaml_quote(item) if isinstance(item, str) else item}")
             elif val:
-                lines.append(f"{key}: {_yaml_quote(str(val))}")
+                lines.append(f"{key}: {_yaml_quote(val) if isinstance(val, str) else val}")
             else:
                 lines.append(f"{key}:")
         lines.append("---\n")

@@ -116,12 +116,7 @@ def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -
             raise FileNotFoundError(f"Note not found: {relative_path}")
         content = src.read_text()
 
-        if backend:
-            old_key = backend.note_link_key(src, content)
-        else:
-            # Legacy zk behavior: wikilink key is the frontmatter title
-            fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-            old_key = _yaml_unquote(fm_title_match.group(1).strip()) if fm_title_match else src.stem
+        old_key = _wikilink_key_for(src, content, backend)
 
         new_slug = _slugify(new_title)
         # nosemgrep: semgrep.alaya-path-traversal -- src from resolve_note_path(), slug from _slugify()
@@ -192,11 +187,9 @@ def _wikilink_key_for(src: Path, content: str, backend=None) -> str:
     """The key other notes use to link to this note."""
     if backend:
         return backend.note_link_key(src, content)
+    # Legacy zk behavior: wikilink key is the frontmatter title
     match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-    key = match.group(1).strip() if match else src.stem
-    if len(key) >= 2 and key[0] == key[-1] and key[0] in ('"', "'"):
-        key = key[1:-1]
-    return key
+    return _yaml_unquote(match.group(1).strip()) if match else src.stem
 
 
 def preview_move(relative_path: str, destination_dir: str, vault: Path) -> str:
