@@ -7,7 +7,7 @@ from alaya.errors import SECTION_NOT_FOUND
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, ALREADY_EXISTS, OUTSIDE_VAULT, INVALID_ARGUMENT
 from alaya.events import emit, NoteEvent, EventType
-from alaya.vault import resolve_note_path
+from alaya.vault import _yaml_quote, resolve_note_path
 from alaya.tools._locks import get_path_lock, atomic_write
 
 _DEDUP_THRESHOLD = 0.85
@@ -114,7 +114,7 @@ def _build_note_content(
         )
 
     # Default inline format (unchanged behaviour when no templates exist)
-    parts = ["---", f"title: {title}", f"date: {today}", "---"]
+    parts = ["---", f"title: {_yaml_quote(title)}", f"date: {today}", "---"]
     if tag_line:
         parts.append(tag_line)
         parts.append("")

@@ -23,7 +23,7 @@ from alaya.events import emit, NoteEvent, EventType
 from alaya.tokens import count_tokens, truncate_to_tokens
 from alaya.tools._locks import get_path_lock, atomic_write
 from alaya.tools.search import AGENT_MEMORY_TYPE
-from alaya.vault import resolve_note_path
+from alaya.vault import _yaml_quote, resolve_note_path
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ def _render_checkpoint(
     now = datetime.now(UTC).replace(microsecond=0).isoformat()
     lines = [
         "---",
-        f"title: Checkpoint {session_id}",
+        f"title: {_yaml_quote(f'Checkpoint {session_id}')}",
         f"type: {AGENT_MEMORY_TYPE}",
         "kind: checkpoint",
         f"session: {session_id}",
