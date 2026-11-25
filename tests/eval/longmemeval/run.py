@@ -12,6 +12,9 @@ evidence sessions and are skipped. Full output goes to a log file; only the
 summary is printed.
 
     uv run python -m tests.eval.longmemeval.run --per-type 5 --budgets 1000,2000,4000
+
+Each question needs a fresh vault and index, so indexing (CPU embedding, which
+already uses most cores) dominates: the full 470 questions take about 3.5 h.
 """
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ import tempfile
 import time
 from collections import defaultdict
 from datetime import date
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -119,7 +122,7 @@ def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> 
     from alaya.index import corrective as corrective_mod
     from alaya.index.reindex import reindex_all
     from alaya.index.store import get_store, reset_store
-    from alaya.tools import search
+    from alaya.tools import memory, search
     from alaya.tools.memory import memory_recall
 
     gold = [note_name(s) for s in entry["answer_session_ids"]]
@@ -137,8 +140,11 @@ def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> 
             opts = dict(opts)
             threshold = opts.pop("threshold", None)
             filt = relevant if threshold is None else partial(relevant, threshold=threshold)
+            # Budgets only change how the same hits are trimmed: search once per variant.
+            fetch_once = lru_cache(maxsize=None)(memory.get_memory_context)
             with patch.object(search, "_run_corrective_search", partial(corrective, **opts)), \
-                 patch.object(corrective_mod, "filter_relevant", filt):
+                 patch.object(corrective_mod, "filter_relevant", filt), \
+                 patch.object(memory, "get_memory_context", fetch_once):
                 for budget in budgets:
                     out = memory_recall(entry["question"], vault, budget_tokens=budget)
                     rows.append({
