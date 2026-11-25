@@ -269,6 +269,7 @@ class TestSchemaMigration:
     def test_no_mismatch_needs_reindex_false(self, tmp_path: Path) -> None:
         store = VaultStore(tmp_path / "lance")
         fake_table = MagicMock()
+        fake_table.count_rows.return_value = 0
         fake_db = MagicMock()
         fake_db.create_table.return_value = fake_table
 
@@ -307,3 +308,32 @@ class TestGetStoreConcurrency:
         # All threads must have received the exact same instance
         assert len(results) == 10
         assert all(s is results[0] for s in results), "Multiple VaultStore instances created"
+
+
+class TestIndexFormat:
+    """#189: indexes written before note_type was kept get one full reindex."""
+
+    def _populated(self, tmp_path: Path) -> Path:
+        store = VaultStore(tmp_path / "lance")
+        chunks = _make_chunks("ideas/a.md")
+        upsert_note("ideas/a.md", chunks, _fake_embeddings(chunks), store)
+        return tmp_path / "lance"
+
+    def test_old_populated_index_is_reindexed_once(self, tmp_path: Path) -> None:
+        db = self._populated(tmp_path)
+        (db / "index_format").unlink()  # as written by a pre-#189 alaya
+
+        store = VaultStore(db)
+        store._get_table()
+        assert store.take_needs_reindex() is True
+
+        again = VaultStore(db)  # next start: marker is current
+        again._get_table()
+        assert again.take_needs_reindex() is False
+
+    def test_new_index_needs_no_reindex(self, tmp_path: Path) -> None:
+        db = self._populated(tmp_path)  # created by this version, marker written
+        assert (db / "index_format").read_text() == "2"
+        store = VaultStore(db)
+        store._get_table()
+        assert store.take_needs_reindex() is False

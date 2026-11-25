@@ -3,7 +3,15 @@
 All notable changes to `alaya-mcp`. Versions follow [semantic versioning](https://semver.org/); while
 the major version is 0, a minor bump may break compatibility.
 
-## 0.2.0 — unreleased
+## Unreleased
+
+### Fixed
+
+- Indexes built before 0.2.0 are reindexed once, automatically, on first start, so `note_type`
+  filtering works without a manual `reindex_vault`. (#189)
+- `rename_note` re-indexes the renamed note, so search shows its new title. (#188)
+
+## 0.2.0 — 2026-11-25
 
 ### Breaking
 

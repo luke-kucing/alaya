@@ -19,6 +19,12 @@ _TABLE_NAME = "notes"
 _STORE_ERRORS = (OSError, ValueError, pa.ArrowInvalid)
 
 
+# Bump to force existing indexes through one full reindex on next start.
+# 2: chunks carry note_type (#178, #189).
+_INDEX_FORMAT = 2
+_FORMAT_MARKER = "index_format"
+
+
 def _get_dim() -> int:
     from alaya.index.models import get_active_model
     return get_active_model().dimensions
@@ -98,7 +104,31 @@ class VaultStore:
                         db.drop_table(_TABLE_NAME)
                         self._table = db.create_table(_TABLE_NAME, schema=schema)
                         self._needs_reindex = True
+                    self._check_format(self._table)
         return self._table
+
+    def _check_format(self, table: Any) -> None:
+        """Flag a one-time full reindex when existing rows predate _INDEX_FORMAT.
+
+        Covers fixes that change what gets written into an unchanged schema
+        (e.g. note_type being dropped before #178), which create_table can't see.
+        """
+        marker = Path(self.db_path) / _FORMAT_MARKER
+        try:
+            current = int(marker.read_text().strip())
+        except (OSError, ValueError):
+            current = 1
+        if current >= _INDEX_FORMAT:
+            return
+        if not self._needs_reindex and table.count_rows() > 0:
+            logger.warning(
+                "Index format %d < %d: starting a one-time background reindex.", current, _INDEX_FORMAT
+            )
+            self._needs_reindex = True
+        # shortcut: marked before the reindex finishes; a crash mid-reindex leaves old rows
+        # (rerun reindex_vault force=True), upgrade to marking from reindex_all if that bites
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(_INDEX_FORMAT))
 
     def take_needs_reindex(self) -> bool:
         """Return and clear the needs_reindex flag. Thread-safe via _init_lock."""
