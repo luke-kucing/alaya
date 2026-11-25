@@ -43,9 +43,8 @@ class TestWatcherConcurrency:
 
         assert not errors, f"Concurrent access raised: {errors}"
 
-    def test_debounce_rapid_events_single_upsert(self, vault: Path) -> None:
+    def test_debounce_rapid_events_single_upsert(self, vault: Path, wait_until) -> None:
         """10 rapid on_modified events on the same file must result in exactly 1 upsert."""
-        import time
         handler = VaultEventHandler(vault=vault, store=MagicMock(), debounce_seconds=0.05)
         src_path = str(vault / "projects/second-brain.md")
 
@@ -56,12 +55,11 @@ class TestWatcherConcurrency:
             for _ in range(10):
                 handler._debounced_upsert(src_path)
 
-            time.sleep(0.15)
+            wait_until(lambda: mock_upsert.called, settle=0.1)
             assert mock_upsert.call_count == 1
 
-    def test_concurrent_debounce_different_files(self, vault: Path) -> None:
+    def test_concurrent_debounce_different_files(self, vault: Path, wait_until) -> None:
         """Concurrent debounced upserts on different files must each fire exactly once."""
-        import time
         handler = VaultEventHandler(vault=vault, store=MagicMock(), debounce_seconds=0.05)
         paths = [
             str(vault / "projects/second-brain.md"),
@@ -85,7 +83,7 @@ class TestWatcherConcurrency:
             for t in threads:
                 t.join()
 
-            time.sleep(0.15)
+            wait_until(lambda: mock_upsert.call_count >= len(paths), settle=0.1)
             assert mock_upsert.call_count == len(paths)
 
 

@@ -65,7 +65,7 @@ class TestVaultEventHandler:
             handler.on_modified(event)
             mock_upsert.assert_not_called()
 
-    def test_pdf_in_raw_triggers_ingest(self, vault: Path) -> None:
+    def test_pdf_in_raw_triggers_ingest(self, vault: Path, wait_until) -> None:
         handler = self._make_handler(vault)
         event = MagicMock()
         event.is_directory = False
@@ -78,7 +78,7 @@ class TestVaultEventHandler:
         with patch("alaya.watcher.ingest") as mock_ingest:
             # call _trigger_ingest directly to avoid thread timing issues
             handler._trigger_ingest(src_path)
-            import time; time.sleep(0.1)  # let the daemon thread run
+            wait_until(lambda: mock_ingest.called, settle=0.05)  # daemon thread
             mock_ingest.assert_called_once()
 
     def test_stop_waits_for_ingest_threads(self, vault: Path) -> None:
@@ -142,7 +142,7 @@ class TestVaultEventHandler:
             handler._do_upsert(src_path)
             mock_log.warning.assert_called_once()
 
-    def test_ingest_error_is_logged_not_raised(self, vault: Path) -> None:
+    def test_ingest_error_is_logged_not_raised(self, vault: Path, wait_until) -> None:
         handler = self._make_handler(vault)
         src_path = str(vault / "raw/broken.pdf")
         (vault / "raw").mkdir(exist_ok=True)
@@ -151,7 +151,7 @@ class TestVaultEventHandler:
         with patch("alaya.watcher.ingest", side_effect=RuntimeError("parse failed")), \
              patch("alaya.watcher.logger") as mock_log:
             handler._trigger_ingest(src_path)
-            import time; time.sleep(0.1)
+            wait_until(lambda: mock_log.warning.called, settle=0.05)
             mock_log.warning.assert_called_once()
 
 
@@ -162,8 +162,7 @@ class TestDebounce:
         mock_store = MagicMock()
         return VaultEventHandler(vault=vault, store=mock_store, debounce_seconds=0.05)
 
-    def test_single_event_fires_upsert_once(self, vault: Path) -> None:
-        import time
+    def test_single_event_fires_upsert_once(self, vault: Path, wait_until) -> None:
         handler = self._make_handler(vault)
         src_path = str(vault / "projects/second-brain.md")
 
@@ -171,11 +170,10 @@ class TestDebounce:
              patch("alaya.watcher.chunk_note", return_value=[MagicMock()]), \
              patch("alaya.watcher.embed_chunks", return_value=[MagicMock()]):
             handler._debounced_upsert(src_path)
-            time.sleep(0.15)  # wait past debounce
+            wait_until(lambda: mock_upsert.called, settle=0.1)  # past debounce
             mock_upsert.assert_called_once()
 
-    def test_rapid_events_fire_upsert_once(self, vault: Path) -> None:
-        import time
+    def test_rapid_events_fire_upsert_once(self, vault: Path, wait_until) -> None:
         handler = self._make_handler(vault)
         src_path = str(vault / "projects/second-brain.md")
 
@@ -185,11 +183,10 @@ class TestDebounce:
             # rapid-fire 5 events — debounce resets each time
             for _ in range(5):
                 handler._debounced_upsert(src_path)
-            time.sleep(0.15)  # wait past debounce
+            wait_until(lambda: mock_upsert.called, settle=0.1)  # past debounce
             mock_upsert.assert_called_once()
 
-    def test_different_files_have_independent_debounce(self, vault: Path) -> None:
-        import time
+    def test_different_files_have_independent_debounce(self, vault: Path, wait_until) -> None:
         handler = self._make_handler(vault)
         path_a = str(vault / "projects/second-brain.md")
         path_b = str(vault / "resources/kubernetes-notes.md")
@@ -199,11 +196,10 @@ class TestDebounce:
              patch("alaya.watcher.embed_chunks", return_value=[MagicMock()]):
             handler._debounced_upsert(path_a)
             handler._debounced_upsert(path_b)
-            time.sleep(0.15)
+            wait_until(lambda: mock_upsert.call_count >= 2, settle=0.1)
             assert mock_upsert.call_count == 2
 
-    def test_timer_cleaned_up_after_firing(self, vault: Path) -> None:
-        import time
+    def test_timer_cleaned_up_after_firing(self, vault: Path, wait_until) -> None:
         handler = self._make_handler(vault)
         src_path = str(vault / "projects/second-brain.md")
 
@@ -212,9 +208,8 @@ class TestDebounce:
              patch("alaya.watcher.embed_chunks", return_value=[MagicMock()]):
             handler._debounced_upsert(src_path)
             assert src_path in handler._timers
-            time.sleep(0.15)
             # timer entry removed after firing
-            assert src_path not in handler._timers
+            assert wait_until(lambda: src_path not in handler._timers)
 
 
 class TestRecentlyIndexed:
