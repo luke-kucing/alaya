@@ -3,6 +3,13 @@
 All notable changes to `alaya-mcp`. Versions follow [semantic versioning](https://semver.org/); while
 the major version is 0, a minor bump may break compatibility.
 
+## Unreleased
+
+### Added
+
+- Templates can use `{title_yaml}`, a YAML-quoted title, for frontmatter values such as
+  `title: {title_yaml}`. `{title}` stays raw for headings and body text. (#192)
+
 ## 0.2.1 — 2026-11-25
 
 ### Fixed

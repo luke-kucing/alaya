@@ -92,7 +92,11 @@ def _build_note_content(
     directory: str,
     template: str | None,
 ) -> str:
-    """Build note content from a template or the default inline format."""
+    """Build note content from a template or the default inline format.
+
+    Template placeholders: {title}, {title_yaml} (YAML-quoted, for frontmatter values),
+    {date}, {tags}, {body}, {directory}.
+    """
     tag_line = " ".join(f"#{t}" for t in tags) if tags else ""
     today = date.today().isoformat()
 
@@ -107,6 +111,7 @@ def _build_note_content(
         return _render_template(
             tmpl,
             title=title,
+            title_yaml=_yaml_quote(title),
             date=today,
             tags=tag_line,
             body=body,

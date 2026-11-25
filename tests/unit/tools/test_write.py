@@ -123,6 +123,14 @@ class TestTemplates:
         result = _render_template("{title} and {unknown}", title="T")
         assert "{unknown}" in result
 
+    def test_title_yaml_placeholder_quotes_frontmatter_title(self, vault: Path) -> None:
+        import yaml
+        (vault / "templates").mkdir(exist_ok=True)
+        (vault / "templates" / "default.md").write_text("---\ntitle: {title_yaml}\n---\n# {title}\n")
+        content = _build_note_content("Re: #42 fix", [], "", vault, "ideas", None)
+        assert yaml.safe_load(content.split("---")[1])["title"] == "Re: #42 fix"
+        assert "# Re: #42 fix\n" in content
+
     def test_create_note_uses_named_template(self, vault: Path) -> None:
         (vault / "templates").mkdir(exist_ok=True)
         (vault / "templates" / "meeting.md").write_text(
