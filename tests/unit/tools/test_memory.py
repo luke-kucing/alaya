@@ -9,6 +9,7 @@ from alaya import tokens
 from alaya.backend.config import get_backend
 from alaya.tools import memory
 from alaya.tools.memory import (
+    get_memory_context,
     memory_checkpoint,
     memory_recall,
     memory_resume,
@@ -198,6 +199,30 @@ def _recall(vault: Path, backend, fake: list[dict], **kw) -> str:
     with patch("alaya.tools.search._hybrid_search_available", return_value=True), \
          patch("alaya.tools.search._run_corrective_search", return_value=fake):
         return memory_recall("q", vault, budget_tokens=2000, backend=backend, **kw)
+
+
+class TestGetMemoryContext:
+    """#145: the structured helper behind memory_recall and the HTTP/Resource surface."""
+
+    def test_top_k_one_chunk_per_note(self, vault: Path) -> None:
+        fake = [
+            {"path": "ideas/a.md", "title": "A", "score": 0.9, "text": "a1"},
+            {"path": "ideas/a.md", "title": "A", "score": 0.8, "text": "a2"},
+            {"path": "ideas/b.md", "title": "B", "score": 0.7, "text": "b"},
+            {"path": "ideas/c.md", "title": "C", "score": 0.6, "text": "c"},
+        ]
+        with patch("alaya.tools.search._hybrid_search_available", return_value=True), \
+             patch("alaya.tools.search._run_corrective_search", return_value=fake):
+            out = get_memory_context("q", vault, k=2)
+        assert [(r["path"], r["text"]) for r in out] == [("ideas/a.md", "a1"), ("ideas/b.md", "b")]
+
+    def test_no_index_returns_none(self, vault: Path) -> None:
+        with patch("alaya.tools.search._hybrid_search_available", return_value=False):
+            assert get_memory_context("q", vault) is None
+
+    def test_k_must_be_positive(self, vault: Path) -> None:
+        with pytest.raises(ValueError):
+            get_memory_context("q", vault, k=0)
 
 
 class TestMemoryRecallFreshness:
