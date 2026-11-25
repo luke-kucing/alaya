@@ -233,6 +233,12 @@ class TestAppendToNote:
         rest = "\n".join(lines[notes_idx:])
         assert "New section entry." in rest
 
+    def test_section_header_case_insensitive(self, vault: Path) -> None:
+        append_to_note("projects/second-brain.md", "Lowercase hit.", vault, section_header="notes")
+        lines = (vault / "projects/second-brain.md").read_text().splitlines()
+        hit = next(i for i, l in enumerate(lines) if "Lowercase hit." in l)
+        assert lines.index("## Notes") < hit < lines.index("## Links")
+
     def test_section_header_missing_raises(self, vault: Path) -> None:
         with pytest.raises(ValueError, match="[Ss]ection"):
             append_to_note("projects/second-brain.md", "text", vault, section_header="Nonexistent Section")
