@@ -74,3 +74,20 @@ def test_rename_emits_moved_then_linking_notes(vault: Path, events) -> None:
     kinds = [(e.event_type, e.path) for e in events]
     assert kinds[0] == (EventType.MOVED, "ideas/audio-capture.md")
     assert (EventType.MODIFIED, "ideas/linker.md") in kinds[1:]
+
+
+def test_emitted_path_makes_the_watcher_skip(vault: Path, events) -> None:
+    """The server listener marks event.path indexed; the watcher must look up the same key."""
+    from unittest.mock import MagicMock
+
+    from alaya.watcher import VaultEventHandler
+
+    handler = VaultEventHandler(vault=vault, store=MagicMock())
+    on_note_change(lambda e: handler.mark_indexed(e.path))
+    replace_section("projects/second-brain.md", "Notes", "new", vault)
+    todo = next(t for t in get_todos(vault, directories=["projects"]) if "scaffold" in t["text"])
+    complete_todo(todo["path"], todo["line"], todo["text"], vault)
+    capture_to_inbox("x", vault)
+
+    for path in ("projects/second-brain.md", todo["path"], "inbox.md"):
+        assert handler._was_recently_indexed(handler._relative(str(vault / path)))
