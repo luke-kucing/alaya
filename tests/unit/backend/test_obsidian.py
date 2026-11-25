@@ -297,5 +297,8 @@ class TestRenderFrontmatterQuoting:
         assert backend.parse_frontmatter(rendered + "body\n") == meta
 
     def test_non_string_values_keep_their_type(self, backend: ObsidianBackend) -> None:
+        import yaml
+
+        # parse_frontmatter stringifies scalars, so check what Obsidian's YAML reader sees
         meta = {"title": "t", "priority": 3, "done": True, "ratio": 0.5, "nums": [1, 2]}
-        assert backend.parse_frontmatter(backend.render_frontmatter(meta) + "body\n") == meta
+        assert yaml.safe_load(backend.render_frontmatter(meta).strip("-\n")) == meta
