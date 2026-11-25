@@ -51,6 +51,13 @@ class TestBuildContextPrefix:
 
 
 class TestAddChunkContext:
+    def test_keeps_note_type(self):
+        """The index's type filters depend on it (found in #172)."""
+        from alaya.index.embedder import chunk_note
+
+        chunks = chunk_note("agents/s/checkpoint.md", "---\ntitle: c\ntype: agent-memory\n---\n\nbody text\n")
+        assert chunks and all(c.note_type == "agent-memory" for c in chunks)
+
     def test_prepends_context_to_text(self):
         chunks = [_make_chunk()]
         result = add_chunk_context(chunks)

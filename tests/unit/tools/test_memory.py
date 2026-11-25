@@ -12,6 +12,7 @@ from alaya.tools.memory import (
     memory_checkpoint,
     memory_recall,
     memory_resume,
+    memory_stale,
     memory_supersede,
     _safe_session_id,
 )
@@ -333,6 +334,73 @@ class TestMemorySupersede:
         assert not (vault / "agents/new/checkpoint.md").exists()
 
 
+def _memory(vault: Path, rel: str, *, updated="2099-01-01T00:00:00+00:00", ttl=30,
+            confidence=0.9, body="body") -> str:
+    fm = (f"title: {Path(rel).stem}\ntype: agent-memory\nconfidence: {confidence}\n"
+          f"ttl_days: {ttl}\nupdated: {updated}\n")
+    return _note(vault, rel, body, fm=fm)
+
+
+class TestMemoryStale:
+    """#172: find memory that needs upkeep."""
+
+    def _section(self, out: str, name: str) -> str:
+        return out.split(f"### {name}")[1].split("###")[0]
+
+    def test_groups(self, vault: Path, backend) -> None:
+        _memory(vault, "agents/old/checkpoint.md", updated="2025-01-01T00:00:00+00:00", body="[[hub]]")
+        _memory(vault, "agents/unsure/checkpoint.md", confidence=0.2, body="[[hub]]")
+        _memory(vault, "agents/alone/checkpoint.md")
+        _memory(vault, "agents/linked/checkpoint.md")
+        _note(vault, "hub.md", "see [[checkpoint-linked]]")
+        # zk links by title, so give the linked checkpoint a title the hub links to
+        p = vault / "agents/linked/checkpoint.md"
+        p.write_text(p.read_text().replace("title: checkpoint", "title: checkpoint-linked"))
+        with patch("alaya.tools.memory._near_duplicates",
+                   return_value=[("agents/a.md", "agents/b.md", 0.97)]):
+            out = memory_stale(vault, backend=backend)
+
+        assert "agents/old/checkpoint.md" in self._section(out, "expired")
+        assert "agents/unsure/checkpoint.md` — confidence 0.2" in self._section(out, "low_confidence")
+        orphans = self._section(out, "orphans")
+        assert "agents/alone/" in orphans
+        assert "agents/linked/" not in orphans and "agents/old/" not in orphans
+        assert "`agents/a.md` ≈ `agents/b.md` (0.97)" in self._section(out, "near_duplicates")
+        assert "hub.md" not in out  # ordinary notes are never reported
+        assert "<!-- token_count:" in out
+
+    def test_scope_limit_and_budget(self, vault: Path, backend) -> None:
+        for i in range(30):
+            _memory(vault, f"agents/s{i:02}/checkpoint.md", confidence=0.1, body="x " * 50)
+        _memory(vault, "elsewhere/m.md", confidence=0.1)
+        with patch("alaya.tools.memory._near_duplicates", return_value=[]):
+            out = memory_stale(vault, scope="agents", limit=5, backend=backend)
+            small = memory_stale(vault, budget_tokens=120, backend=backend)
+        assert "elsewhere/m.md" not in out
+        assert "### low_confidence (30, first 5)" in out
+        assert tokens.count_tokens(small) <= 120 and "truncated" in small
+        with pytest.raises(ValueError):
+            memory_stale(vault, scope="../out", backend=backend)
+
+    def test_near_duplicates_from_vectors(self, vault: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from alaya.tools.memory import _near_duplicates
+
+        rows = [
+            {"path": "a.md", "vector": [1.0, 0.0]}, {"path": "a.md", "vector": [1.0, 0.1]},
+            {"path": "b.md", "vector": [1.0, 0.05]},
+            {"path": "c.md", "vector": [0.0, 1.0]},
+            {"path": "not-memory.md", "vector": [1.0, 0.05]},
+        ]
+        store = MagicMock()
+        store._get_table.return_value.search.return_value.where.return_value \
+            .select.return_value.limit.return_value.to_list.return_value = rows
+        with patch("alaya.index.store.get_store", return_value=store):
+            pairs = _near_duplicates(vault, {"a.md", "b.md", "c.md"}, 0.92)
+        assert [(a, b) for a, b, _ in pairs] == [("a.md", "b.md")]
+
+
 class TestRegistration:
     @pytest.mark.asyncio
     async def test_tools_registered(self, vault: Path, backend) -> None:
@@ -344,6 +412,7 @@ class TestRegistration:
             "memory_checkpoint_tool",
             "memory_resume_tool",
             "memory_supersede_tool",
+            "memory_stale_tool",
         }
 
     @pytest.mark.asyncio

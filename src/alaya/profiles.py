@@ -39,6 +39,17 @@ BUILTIN_PROFILES: dict[str, list[str] | str] = {
         "renew_task",
         "release_task",
     ],
+    # Scheduled memory upkeep (#172): find stale memory, then merge,
+    # supersede or delete it, and leave a report checkpoint.
+    "gardener": [
+        "memory_stale",
+        "get_note",
+        "memory_supersede",
+        "memory_checkpoint",
+        "store_summary",
+        "append_to_note",
+        "delete_note",
+    ],
     # Evaluators and reviewers: read the vault, never change it.
     "readonly": [
         "search_notes",

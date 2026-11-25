@@ -249,6 +249,7 @@ compacted, and a way to rebuild working memory from a fresh context.
 | `memory_recall` | Retrieve vault context for a query, trimmed to a token budget. Returns chunk text directly — no follow-up `get_note` per hit |
 | `memory_checkpoint` | Persist a session summary, decisions, open items, and entities to `agents/<session>/checkpoint.md` as `type: agent-memory` |
 | `memory_resume` | Return the latest checkpoint plus its 1-hop linked notes, budgeted — the handoff document a fresh iteration starts from |
+| `memory_stale` | List agent memory needing upkeep, grouped: expired (past `ttl_days`), low confidence, near-duplicates (by embedding), orphans (no links in or out). Paths only, token-capped |
 | `memory_supersede` | Mark an old note replaced by a new one (`superseded_by` / `supersedes` wikilinks in frontmatter) instead of overwriting it; recall then skips the old note unless `include_superseded=True` |
 
 Every response ends with a `<!-- token_count: N -->` comment so a caller can do
@@ -268,7 +269,8 @@ benefits rather than each having to filter for itself.
 | Profile | Tools |
 |---|---|
 | `librarian` | Everything. The default — existing clients see no change |
-| `orchestrator` | Memory, search, and capture: `memory_*`, `search_notes`, `get_note`, `smart_capture`, `append_to_note`, `get_todos` |
+| `orchestrator` | Memory, search, capture and the task ledger: `memory_recall`, `memory_checkpoint`, `memory_resume`, `search_notes`, `get_note`, `smart_capture`, `append_to_note`, `get_todos`, `create_task`, `ready_tasks`, `claim_task`, `renew_task`, `release_task` |
+| `gardener` | Scheduled memory upkeep: `memory_stale`, `get_note`, `memory_supersede`, `memory_checkpoint`, `store_summary`, `append_to_note`, `delete_note` (see [Memory gardening](#memory-gardening)) |
 | `readonly` | Read the vault, never change it: search, navigation, stats, health, `memory_recall` |
 
 ```bash
@@ -280,6 +282,48 @@ ALAYA_TOOL_PROFILE=readonly alaya
 Define your own under `[profiles]` in `alaya.toml`; a profile of the same name
 overrides a built-in. A profile naming a tool that does not exist is a startup
 error rather than a silently smaller tool list.
+
+### Memory gardening
+
+Agent memory decays without upkeep: duplicate checkpoints, expired items,
+contradictions. alaya finds them (`memory_stale`) and stores the fixes
+(`memory_supersede`, `store_summary`, `delete_note`); the client model does the
+reasoning, so alaya itself stays model-free. Run it nightly with the `gardener`
+profile.
+
+`~/.config/alaya/gardener.md`:
+
+```markdown
+You maintain the agent memory in this vault. Work only through the alaya tools.
+
+1. Call memory_stale.
+2. near_duplicates: get_note both. If one says everything the other does, memory_supersede(old, new,
+   reason). If each adds something, store_summary a merged version on the newer one, then supersede the older.
+3. expired: get_note each. If it still holds, leave it (its owner will re-checkpoint). If it is
+   obsolete, delete_note it (call twice: the first call returns a confirm token).
+4. low_confidence: if a newer note confirms or contradicts it, memory_supersede it with that note.
+   Otherwise leave it.
+5. orphans: if it names a person or project with a note, append_to_note a [[link]] to it. Otherwise leave it.
+6. Never change a note you have not read with get_note. When unsure, leave it.
+7. Finish with memory_checkpoint(session_id="gardener", agent="gardener", summary_md=<what you changed and why,
+   one line per note>), which writes agents/gardener/checkpoint.md.
+```
+
+`~/.config/alaya/gardener.mcp.json`:
+
+```json
+{"mcpServers": {"alaya": {"command": "uvx", "args": ["--from", "alaya-mcp", "alaya", "--profile", "gardener"],
+                          "env": {"ALAYA_VAULT_DIR": "/Users/me/notes"}}}}
+```
+
+Cron, 03:00 every night, with [`claude -p`](https://docs.claude.com/en/docs/claude-code/cli-reference) (or the same prompt as a Claude Code scheduled routine):
+
+```cron
+0 3 * * * cd ~/notes && claude -p "$(cat ~/.config/alaya/gardener.md)" --mcp-config ~/.config/alaya/gardener.mcp.json --allowedTools "mcp__alaya__*" >> ~/.local/state/alaya-gardener.log 2>&1
+```
+
+The report lands in `agents/gardener/checkpoint.md`, overwritten each run;
+deletions go to the archive, not away.
 
 ### Output budget
 
