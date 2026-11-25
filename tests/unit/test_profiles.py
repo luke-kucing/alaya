@@ -193,6 +193,13 @@ class TestBuiltinProfileContents:
         for name in BUILTIN_PROFILES:
             # Raises ProfileError if a profile names a tool that does not exist.
             resolve_profile(name, registered)
+        # The gardener (#172) gets exactly its upkeep tools.
+        assert resolve_profile("gardener", registered) == {
+            f"{t}_tool" for t in (
+                "memory_stale", "get_note", "memory_supersede", "memory_checkpoint",
+                "store_summary", "append_to_note", "delete_note",
+            )
+        }
 
     def test_orchestrator_is_a_small_surface(self) -> None:
         # 8 memory/search tools + the 5 task-ledger tools (#170).

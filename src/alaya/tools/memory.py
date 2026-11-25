@@ -1,4 +1,5 @@
-"""Agent memory tools: memory_recall, memory_checkpoint, memory_resume, memory_supersede.
+"""Agent memory tools: memory_recall, memory_checkpoint, memory_resume,
+memory_supersede, memory_stale.
 
 These exist for agent harnesses rather than humans. A harness loop needs
 budgeted retrieval in one call, a durable place to put a summary when its
@@ -28,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RECALL_BUDGET = 2000
 DEFAULT_RESUME_BUDGET = 4000
+DEFAULT_STALE_BUDGET = 2000
+LOW_CONFIDENCE = 0.5
+DUPLICATE_SIMILARITY = 0.92
 
 # Tokens reserved for the header/footer comment lines so the total response
 # still fits the caller's budget.
@@ -169,19 +173,28 @@ def _weight(meta: dict, now: datetime, include_expired: bool, dropped: bool) -> 
         return None
     if meta.get("type") != AGENT_MEMORY_TYPE:
         return 1.0
-    if not include_expired:
-        try:
-            updated = datetime.fromisoformat(meta["updated"])
-            if updated.tzinfo is None:
-                updated = updated.replace(tzinfo=UTC)
-            if updated + timedelta(days=float(meta["ttl_days"])) < now:
-                return None
-        except (KeyError, ValueError):
-            pass  # no usable ttl: never expires
+    if not include_expired and _expired(meta, now):
+        return None
+    confidence = _confidence(meta)
+    return 1.0 if confidence is None else confidence
+
+
+def _expired(meta: dict, now: datetime) -> bool:
+    """Past ``updated + ttl_days``; a note without a usable ttl never expires."""
+    try:
+        updated = datetime.fromisoformat(meta["updated"])
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=UTC)
+        return updated + timedelta(days=float(meta["ttl_days"])) < now
+    except (KeyError, ValueError):
+        return False
+
+
+def _confidence(meta: dict) -> float | None:
     try:
         return min(1.0, max(0.0, float(meta["confidence"])))
     except (KeyError, ValueError):
-        return 1.0
+        return None
 
 
 def _weigh_memory(
@@ -369,6 +382,114 @@ def memory_supersede(old: str, new: str, vault: Path, reason: str = "", backend=
     return f"{old_rel} superseded by {new_rel}"
 
 
+# --- memory_stale ----------------------------------------------------------
+
+def _near_duplicates(vault: Path, paths: set[str], threshold: float) -> list[tuple[str, str, float]]:
+    """Pairs of agent-memory notes whose mean chunk vectors are at least *threshold* alike.
+
+    shortcut: all-pairs cosine over every memory note, fine to a few thousand
+    notes; move to the store's ANN search if agent memory grows past that.
+    """
+    import numpy as np
+
+    from alaya.index.store import get_store
+
+    try:
+        rows = (
+            get_store(vault)._get_table().search()
+            .where(f"note_type = '{AGENT_MEMORY_TYPE}'")
+            .select(["path", "vector"]).limit(100_000).to_list()
+        )
+    except Exception as e:  # noqa: BLE001 — no index yet: report the other groups
+        logger.debug("near-duplicate scan skipped: %s", e)
+        return []
+    by_path: dict[str, list] = {}
+    for r in rows:
+        if r["path"] in paths:
+            by_path.setdefault(r["path"], []).append(r["vector"])
+    names = sorted(by_path)
+    if len(names) < 2:
+        return []
+    vectors = np.array([np.mean(by_path[n], axis=0) for n in names])
+    vectors /= np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-12
+    sims = vectors @ vectors.T
+    pairs = [
+        (names[i], names[j], float(sims[i, j]))
+        for i in range(len(names)) for j in range(i + 1, len(names))
+        if sims[i, j] >= threshold
+    ]
+    return sorted(pairs, key=lambda p: -p[2])
+
+
+def memory_stale(
+    vault: Path,
+    scope: str | None = None,
+    limit: int = 50,
+    budget_tokens: int = DEFAULT_STALE_BUDGET,
+    low_confidence: float = LOW_CONFIDENCE,
+    similarity: float = DUPLICATE_SIMILARITY,
+    backend=None,
+) -> str:
+    """Agent memory that needs upkeep, grouped: expired, low_confidence,
+    near_duplicates and orphans (no links in or out). At most *limit* items
+    per group, trimmed to *budget_tokens*.
+
+    alaya only finds these; the calling model decides what to merge,
+    supersede or delete.
+    """
+    import re
+
+    from alaya.cache import _parse_frontmatter
+    from alaya.vault import iter_vault_md
+
+    if budget_tokens <= 0 or limit <= 0:
+        raise ValueError("budget_tokens and limit must be positive")
+    root = resolve_note_path(scope, vault) if scope else vault.resolve()
+    link_re = re.compile(r"\[\[([^\]|#]+)")
+
+    now = datetime.now(UTC)
+    memory: dict[str, tuple[dict, str, set[str]]] = {}  # path -> meta, link key, outlinks
+    inlinks: dict[str, set[str]] = {}  # link key -> paths linking to it
+    for md in iter_vault_md(vault):
+        try:
+            content = md.read_text()
+        except OSError:
+            continue
+        rel = str(md.relative_to(vault))
+        outlinks = {m.strip() for m in link_re.findall(content)}
+        for target in outlinks:
+            inlinks.setdefault(target, set()).add(rel)
+        meta = _parse_frontmatter(content)
+        if meta.get("type") == AGENT_MEMORY_TYPE and md.resolve().is_relative_to(root):
+            key = backend.note_link_key(md, content) if backend else md.stem
+            memory[rel] = (meta, key, outlinks)
+
+    groups: dict[str, list[str]] = {"expired": [], "low_confidence": [], "near_duplicates": [], "orphans": []}
+    for rel in sorted(memory):
+        meta, key, outlinks = memory[rel]
+        if _expired(meta, now):
+            groups["expired"].append(f"`{rel}` — updated {meta['updated']}, ttl {meta['ttl_days']} days")
+        confidence = _confidence(meta)
+        if confidence is not None and confidence < low_confidence:
+            groups["low_confidence"].append(f"`{rel}` — confidence {confidence}")
+        if not outlinks and not (inlinks.get(key, set()) - {rel}):
+            groups["orphans"].append(f"`{rel}`")
+    groups["near_duplicates"] = [
+        f"`{a}` ≈ `{b}` ({sim:.2f})" for a, b, sim in _near_duplicates(vault, set(memory), similarity)
+    ]
+
+    lines = [f"## Stale memory: {len(memory)} agent-memory notes scanned", ""]
+    for name, items in groups.items():
+        more = f", first {limit}" if len(items) > limit else ""
+        lines += [f"### {name} ({len(items)}{more})", ""]
+        lines += [f"- {i}" for i in items[:limit]] or ["_(none)_"]
+        lines.append("")
+    body, truncated = truncate_to_tokens("\n".join(lines).rstrip(), max(1, budget_tokens - _ENVELOPE_TOKENS))
+    if truncated:
+        body += "\n\n…[truncated; lower limit or narrow scope]"
+    return _envelope(body)
+
+
 # --- memory_resume ---------------------------------------------------------
 
 def memory_resume(
@@ -511,6 +632,19 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
         return f"Checkpoint saved: {path}"
+
+    @mcp.tool()
+    def memory_stale_tool(scope: str = "", limit: int = 50, budget_tokens: int = DEFAULT_STALE_BUDGET) -> str:
+        """Find agent memory that needs upkeep: expired (past ttl_days),
+        low_confidence, near_duplicates (similar embeddings) and orphans (no
+        links in or out). Returns paths only; read them with get_note, then
+        merge with memory_supersede or remove with delete_note.
+        """
+        try:
+            return memory_stale(vault, scope=scope or None, limit=limit,
+                                budget_tokens=budget_tokens, backend=backend)
+        except ValueError as e:
+            return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
     def memory_supersede_tool(old: str, new: str, reason: str = "") -> str:

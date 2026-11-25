@@ -11,6 +11,8 @@ This implementation uses metadata-based context (no LLM call):
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from alaya.index.embedder import Chunk
 
 
@@ -25,15 +27,8 @@ def add_chunk_context(chunks: list[Chunk]) -> list[Chunk]:
     contextualized = []
     for chunk in chunks:
         prefix = _build_context_prefix(chunk)
-        contextualized.append(Chunk(
-            path=chunk.path,
-            title=chunk.title,
-            tags=chunk.tags,
-            directory=chunk.directory,
-            modified_date=chunk.modified_date,
-            chunk_index=chunk.chunk_index,
-            text=prefix + chunk.text,
-        ))
+        # replace() keeps every other field, note_type included.
+        contextualized.append(replace(chunk, text=prefix + chunk.text))
     return contextualized
 
 
