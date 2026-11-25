@@ -55,3 +55,12 @@ def _build_context_prefix(chunk: Chunk) -> str:
         return ""
 
     return " | ".join(parts) + "\n\n"
+
+
+_PREFIX_LABELS = ("From note: ", "Directory: ", "Tags: ", "Section: ")
+
+
+def strip_context_prefix(text: str) -> str:
+    """Inverse of add_chunk_context: the chunk text as written in the note."""
+    head, sep, rest = text.partition("\n\n")
+    return rest if sep and head.startswith(_PREFIX_LABELS) else text

@@ -151,6 +151,17 @@ def _run_hybrid_search(
     )
 
 
+SNIPPET_CHARS = 240
+
+
+def _snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
+    """One-line, table-safe excerpt of a chunk so a hit can ground an answer without get_note."""
+    from alaya.index.contextual import strip_context_prefix
+
+    flat = " ".join(strip_context_prefix(text).split()).replace("|", "\\|")
+    return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
+
+
 def search_notes(
     query: str,
     vault: Path,
@@ -167,6 +178,9 @@ def search_notes(
     cache=None,
 ) -> str:
     """Search notes by keyword or semantic query. Returns a Markdown table.
+
+    Indexed results carry a snippet of the matching chunk; use memory_recall
+    for full chunk text under a token budget.
 
     Uses adaptive query routing when an index is available; falls back to
     backend keyword search otherwise.
@@ -185,10 +199,10 @@ def search_notes(
         if not results:
             return "No notes matching that query."
         rows = [
-            f"| [[{r['title']}]] | `{r['path']}` | {r['score']:.2f} |"
+            f"| [[{r['title']}]] | `{r['path']}` | {r['score']:.2f} | {_snippet(r.get('text', ''))} |"
             for r in results
         ]
-        header = "| Title | Path | Score |\n|---|---|---|"
+        header = "| Title | Path | Score | Snippet |\n|---|---|---|---|"
         return header + "\n" + "\n".join(rows)
 
     # Fallback: backend keyword search or zk CLI

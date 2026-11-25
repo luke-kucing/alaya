@@ -279,6 +279,10 @@ Query ──▶ Router ──▶ Retrieval ──▶ Correction ──▶ Expans
 |---|---|
 | `search_notes` | Hybrid semantic + keyword search with adaptive routing, corrective RAG, and optional reranking/graph expansion/HyDE |
 
+Indexed results include a one-line snippet (about 240 characters) of the
+matching chunk, so a hit can ground an answer without a follow-up `get_note`.
+For full chunk text under a token budget, use `memory_recall`.
+
 Notes carrying frontmatter `type: agent-memory` are excluded from `search_notes`
 by default so agent scratch memory cannot crowd out curated notes. Pass
 `include_types=["agent-memory"]` to search them explicitly.
