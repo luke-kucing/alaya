@@ -68,6 +68,39 @@ def _envelope(body: str, sources: int | None = None) -> str:
 
 # --- memory_recall ---------------------------------------------------------
 
+def get_memory_context(
+    query: str,
+    vault: Path,
+    k: int | None = 3,
+    scope: str | None = None,
+    include_types: list[str] | None = None,
+    since: str | None = None,
+    include_expired: bool = False,
+    include_superseded: bool = False,
+) -> list[dict] | None:
+    """Top-*k* chunks for *query* as dicts (path, title, score, text, superseded_by?).
+
+    The one retrieval path behind ``memory_recall`` and any non-tool surface (#146):
+    routed + corrective search, memory weighting, one chunk per note. ``k=None``
+    returns every hit. Returns None when there is no vector index.
+    """
+    from alaya.tools.search import _hybrid_search_available, _run_corrective_search
+
+    if k is not None and k <= 0:
+        raise ValueError("k must be positive")
+    if not _hybrid_search_available(vault):
+        return None
+    # Recall is for agents, so agent memory is *included* unless narrowed.
+    results = _run_corrective_search(
+        query, vault, directory=scope or None, limit=max(20, k or 0),
+        include_types=include_types or None, exclude_types=None, since=since or None,
+    )
+    results = _weigh_memory(results, vault, include_expired, include_superseded)
+    seen: set[str] = set()
+    unique = [r for r in results if not (r["path"] in seen or seen.add(r["path"]))]
+    return unique if k is None else unique[:k]
+
+
 def memory_recall(
     query: str,
     vault: Path,
@@ -91,34 +124,24 @@ def memory_recall(
     if budget_tokens <= 0:
         raise ValueError("budget_tokens must be positive")
 
-    from alaya.tools.search import _hybrid_search_available, _run_corrective_search
-
-    if not _hybrid_search_available(vault):
+    results = get_memory_context(
+        query, vault, k=None, scope=scope, include_types=include_types, since=since,
+        include_expired=include_expired, include_superseded=include_superseded,
+    )
+    if results is None:
         return _envelope(
             "No index available — memory_recall requires the vector index. "
             "Call vault_health to check index status.",
             sources=0,
         )
-
-    # Recall is for agents, so agent memory is *included* unless narrowed.
-    results = _run_corrective_search(
-        query, vault, directory=scope or None, limit=20,
-        include_types=include_types or None, exclude_types=None, since=since or None,
-    )
-    results = _weigh_memory(results, vault, include_expired, include_superseded)
     if not results:
         return _envelope(f"No vault context found for: {query}", sources=0)
 
     remaining = max(0, budget_tokens - _ENVELOPE_TOKENS)
     blocks: list[str] = []
     used = 0
-    seen: set[str] = set()
 
     for r in results:
-        if r["path"] in seen:
-            continue
-        seen.add(r["path"])
-
         header = f"### [[{r['title']}]] — `{r['path']}` (score {r['score']:.2f})"
         if r.get("superseded_by"):
             header += f" — superseded by {r['superseded_by']}"
