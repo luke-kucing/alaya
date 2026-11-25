@@ -16,8 +16,8 @@ classifiers = [
     "Topic :: Text Processing :: General",
 ]
 dependencies = [
-    # <4: 4.x is a new major; migrate deliberately (see the fastmcp 4 ticket)
-    "fastmcp>=3.0.2,<4",
+    # <5: next major needs a deliberate migration
+    "fastmcp>=4,<5",
     "lancedb>=0.29",
     "pymupdf4llm>=0.0.17",
     "trafilatura>=2.0",
