@@ -195,7 +195,8 @@ class TestBuiltinProfileContents:
             resolve_profile(name, registered)
 
     def test_orchestrator_is_a_small_surface(self) -> None:
-        assert len(BUILTIN_PROFILES["orchestrator"]) <= 10
+        # 8 memory/search tools + the 5 task-ledger tools (#170).
+        assert len(BUILTIN_PROFILES["orchestrator"]) <= 13
 
     def test_readonly_has_no_write_tools(self) -> None:
         forbidden = ("create", "delete", "move", "rename", "append", "replace", "capture")

@@ -17,6 +17,7 @@ class ErrorCode(str, Enum):
     CONFIRMATION_REQUIRED = "CONFIRMATION_REQUIRED"
     NOT_CONFIGURED = "NOT_CONFIGURED"
     INVALID_ARGUMENT = "INVALID_ARGUMENT"
+    CONFLICT = "CONFLICT"
 
 
 # Re-export bare names for backwards-compatibility with all import sites.
@@ -29,6 +30,7 @@ SECTION_NOT_FOUND = ErrorCode.SECTION_NOT_FOUND
 CONFIRMATION_REQUIRED = ErrorCode.CONFIRMATION_REQUIRED
 NOT_CONFIGURED = ErrorCode.NOT_CONFIGURED
 INVALID_ARGUMENT = ErrorCode.INVALID_ARGUMENT
+CONFLICT = ErrorCode.CONFLICT
 
 
 def error(code: ErrorCode, message: str) -> str:

@@ -89,6 +89,8 @@ def load_vault_config(vault_root: Path) -> VaultConfig:
         config.people_dir = dirs["person"]
     if "agent" in dirs:
         config.agent_dir = dirs["agent"]
+    if "task" in dirs:
+        config.tasks_dir = dirs["task"]
 
     settings = toml_config.get("settings", {})
     if "archives_dir" in settings:
