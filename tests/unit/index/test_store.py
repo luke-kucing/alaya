@@ -327,9 +327,34 @@ class TestIndexFormat:
         store._get_table()
         assert store.take_needs_reindex() is True
 
-        again = VaultStore(db)  # next start: marker is current
+        again = VaultStore(db)  # reindex hasn't finished: still flagged
         again._get_table()
-        assert again.take_needs_reindex() is False
+        assert again.take_needs_reindex() is True
+
+        again.mark_index_current()  # what a successful reindex_all does
+        done = VaultStore(db)
+        done._get_table()
+        assert done.take_needs_reindex() is False
+
+    def test_failed_reindex_leaves_marker_old(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+        from alaya.index.reindex import reindex_all
+
+        db = self._populated(tmp_path)
+        (db / "index_format").unlink()
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "a.md").write_text("# A\n\nbody text\n")
+
+        store = VaultStore(db)
+        store._get_table()
+        with patch("alaya.index.reindex.embed_chunks", side_effect=RuntimeError("killed")):
+            with pytest.raises(RuntimeError):
+                reindex_all(vault, store)
+
+        again = VaultStore(db)
+        again._get_table()
+        assert again.take_needs_reindex() is True
 
     def test_new_index_needs_no_reindex(self, tmp_path: Path) -> None:
         db = self._populated(tmp_path)  # created by this version, marker written

@@ -125,8 +125,12 @@ class VaultStore:
                 "Index format %d < %d: starting a one-time background reindex.", current, _INDEX_FORMAT
             )
             self._needs_reindex = True
-        # shortcut: marked before the reindex finishes; a crash mid-reindex leaves old rows
-        # (rerun reindex_vault force=True), upgrade to marking from reindex_all if that bites
+        if not self._needs_reindex:
+            self.mark_index_current()  # empty, nothing to reindex
+
+    def mark_index_current(self) -> None:
+        """Record that the index was fully written at _INDEX_FORMAT (call after a successful reindex)."""
+        marker = Path(self.db_path) / _FORMAT_MARKER
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(str(_INDEX_FORMAT))
 

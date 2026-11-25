@@ -57,6 +57,7 @@ def reindex_all(vault_root: Path, store=None) -> ReindexResult:
 
     # Remove stale entries for files no longer in the vault
     notes_deleted = 0
+    cleanup_ok = True
     try:
         table = store._get_table()
         all_paths = {r["path"] for r in table.search().select(["path"]).limit(100000).to_list()}
@@ -65,6 +66,11 @@ def reindex_all(vault_root: Path, store=None) -> ReindexResult:
             notes_deleted += 1
     except Exception as e:
         logger.warning("Failed to clean up stale index entries: %s", e)
+        cleanup_ok = False
+
+    # Per-note errors propagate (never reach here); only the swallowed cleanup failure is left to check.
+    if cleanup_ok:
+        store.mark_index_current()
 
     duration = time.monotonic() - start
     return ReindexResult(
