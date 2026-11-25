@@ -1,4 +1,4 @@
-.PHONY: help install test test-unit test-integration lint serve publish
+.PHONY: help install test test-unit test-integration eval lint serve publish
 .DEFAULT_GOAL := help
 
 help:
@@ -19,6 +19,18 @@ test-unit: ## Run unit tests with verbose output
 
 test-integration: ## Run integration tests
 	uv run pytest tests/integration/ -v -m integration
+
+LME_DATA := tests/eval/longmemeval/data/longmemeval_s_cleaned.json
+LME_URL := https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json
+
+eval-data: $(LME_DATA) ## Download LongMemEval-S (~280 MB, not committed)
+
+$(LME_DATA):
+	mkdir -p $(dir $@)
+	curl -fL --retry 3 -o $@.part $(LME_URL) && mv $@.part $@
+
+eval: $(LME_DATA) ## Retrieval eval on LongMemEval-S (opt-in; EVAL_ARGS="--per-type 5")
+	uv run python -m tests.eval.longmemeval.run $(EVAL_ARGS)
 
 ##@ Development
 lint: ## Lint source and tests
