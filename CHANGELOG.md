@@ -3,7 +3,7 @@
 All notable changes to `alaya-mcp`. Versions follow [semantic versioning](https://semver.org/); while
 the major version is 0, a minor bump may break compatibility.
 
-## Unreleased
+## 0.3.0 — 2026-11-25
 
 ### Added
 
