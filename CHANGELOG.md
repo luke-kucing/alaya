@@ -7,11 +7,17 @@ the major version is 0, a minor bump may break compatibility.
 
 ### Added
 
+- `GET /memory/context?q=...&k=3` in `--http` mode returns the top-k vault chunks as JSON for
+  pre-flight middleware. It requires `ALAYA_HTTP_TOKEN` when that is set. (#146)
 - `get_memory_context(query, vault, k=3)` in `alaya.tools.memory` returns the top-k chunks as
   dicts (path, title, score, text). It is the single retrieval path behind `memory_recall`, for
   non-tool surfaces such as #146. (#145)
 - Templates can use `{title_yaml}`, a YAML-quoted title, for frontmatter values such as
   `title: {title_yaml}`. `{title}` stays raw for headings and body text. (#192)
+
+### Changed
+
+- Requires `fastmcp>=4,<5` (was `<4`). No changes to alaya's tools or behaviour. (#186)
 
 ## 0.2.1 — 2026-11-25
 
