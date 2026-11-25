@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 
 from alaya.backend.config import get_vault_root, ConfigError
 

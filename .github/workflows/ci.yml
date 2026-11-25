@@ -52,3 +52,21 @@ jobs:
 
       - name: Run pip-audit
         run: uv tool run pip-audit --progress-spinner off
+
+  wheel:
+    name: Installed wheel smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Smoke-test the wheel with freshly resolved dependencies (no lockfile)
+        run: uv run --isolated --no-project --python 3.12 --with dist/*.whl python scripts/smoke_installed.py vault_fixture
