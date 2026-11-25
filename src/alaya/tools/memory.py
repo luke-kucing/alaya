@@ -1,4 +1,4 @@
-"""Agent memory tools: memory_recall, memory_checkpoint, memory_resume.
+"""Agent memory tools: memory_recall, memory_checkpoint, memory_resume, memory_supersede.
 
 These exist for agent harnesses rather than humans. A harness loop needs
 budgeted retrieval in one call, a durable place to put a summary when its
@@ -10,17 +10,19 @@ Notes written here carry frontmatter ``type: agent-memory`` so that
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastmcp import FastMCP
 
-from alaya.errors import error, INVALID_ARGUMENT
+from alaya.errors import error, INVALID_ARGUMENT, NOT_FOUND
 from alaya.events import emit, NoteEvent, EventType
 from alaya.tokens import count_tokens, truncate_to_tokens
 from alaya.tools._locks import get_path_lock, atomic_write
 from alaya.tools.search import AGENT_MEMORY_TYPE
+from alaya.vault import resolve_note_path
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,7 @@ def memory_recall(
     include_types: list[str] | None = None,
     since: str | None = None,
     include_expired: bool = False,
+    include_superseded: bool = False,
     backend=None,
     cache=None,
 ) -> str:
@@ -78,7 +81,8 @@ def memory_recall(
     Runs the same routed + corrective search pipeline as ``search_notes`` and
     returns the matching chunk text, so the caller does not need a follow-up
     ``get_note`` per hit. Agent memory past its ``ttl_days`` is dropped unless
-    *include_expired*, and its score is weighted by its ``confidence``.
+    *include_expired*, and its score is weighted by its ``confidence``. Notes
+    with ``superseded_by`` set are dropped unless *include_superseded*.
     """
     if budget_tokens <= 0:
         raise ValueError("budget_tokens must be positive")
@@ -97,7 +101,7 @@ def memory_recall(
         query, vault, directory=scope or None, limit=20,
         include_types=include_types or None, exclude_types=None, since=since or None,
     )
-    results = _weigh_memory(results, vault, include_expired)
+    results = _weigh_memory(results, vault, include_expired, include_superseded)
     if not results:
         return _envelope(f"No vault context found for: {query}", sources=0)
 
@@ -112,6 +116,8 @@ def memory_recall(
         seen.add(r["path"])
 
         header = f"### [[{r['title']}]] — `{r['path']}` (score {r['score']:.2f})"
+        if r.get("superseded_by"):
+            header += f" — superseded by {r['superseded_by']}"
         header_cost = count_tokens(header) + 2
         if used + header_cost >= remaining:
             break
@@ -139,17 +145,28 @@ def memory_recall(
     return _envelope(body, sources=len(blocks))
 
 
-def _memory_weight(path: Path, now: datetime, include_expired: bool) -> float | None:
-    """Score multiplier for a hit: its confidence if it is agent memory, else 1.
+def _memory_weight(
+    path: Path, now: datetime, include_expired: bool, include_superseded: bool = False,
+) -> tuple[float | None, str]:
+    """Score multiplier for a hit, and what superseded it ("" if nothing).
 
-    None when it is agent memory past ``updated + ttl_days``.
+    The multiplier is its confidence if it is agent memory, else 1; None when
+    it is agent memory past ``updated + ttl_days``, or superseded and
+    *include_superseded* is off.
     """
     from alaya.cache import _parse_frontmatter
 
     try:
         meta = _parse_frontmatter(path.read_text())
     except OSError:
-        return 1.0
+        return 1.0, ""
+    superseded_by = meta.get("superseded_by", "")
+    return _weight(meta, now, include_expired, superseded_by and not include_superseded), superseded_by
+
+
+def _weight(meta: dict, now: datetime, include_expired: bool, dropped: bool) -> float | None:
+    if dropped:
+        return None
     if meta.get("type") != AGENT_MEMORY_TYPE:
         return 1.0
     if not include_expired:
@@ -167,19 +184,23 @@ def _memory_weight(path: Path, now: datetime, include_expired: bool) -> float | 
         return 1.0
 
 
-def _weigh_memory(results: list[dict], vault: Path, include_expired: bool) -> list[dict]:
-    """Drop expired agent memory and weight the rest by confidence."""
+def _weigh_memory(
+    results: list[dict], vault: Path, include_expired: bool, include_superseded: bool = False,
+) -> list[dict]:
+    """Drop expired or superseded memory and weight the rest by confidence."""
     now = datetime.now(UTC)
-    weights: dict[str, float | None] = {}
+    seen: dict[str, tuple[float | None, str]] = {}
     out = []
     for r in results:
-        if r["path"] not in weights:
-            weights[r["path"]] = _memory_weight(vault / r["path"], now, include_expired)
-        w = weights[r["path"]]
+        if r["path"] not in seen:
+            seen[r["path"]] = _memory_weight(vault / r["path"], now, include_expired, include_superseded)
+        w, superseded_by = seen[r["path"]]
         if w is None:
             continue
-        out.append(r if w == 1.0 else {**r, "score": r["score"] * w})
-    if any(w not in (None, 1.0) for w in weights.values()):
+        if w != 1.0:
+            r = {**r, "score": r["score"] * w}
+        out.append({**r, "superseded_by": superseded_by} if superseded_by else r)
+    if any(w not in (None, 1.0) for w, _ in seen.values()):
         out.sort(key=lambda r: r["score"], reverse=True)
     return out
 
@@ -238,13 +259,19 @@ def memory_checkpoint(
     entities: list[str] | None = None,
     confidence: float = 0.7,
     ttl_days: int = 30,
+    supersedes: list[str] | None = None,
     backend=None,
 ) -> str:
-    """Write (or overwrite) the checkpoint for *session_id*. Returns its path."""
+    """Write (or overwrite) the checkpoint for *session_id*. Returns its path.
+
+    Each note in *supersedes* is marked replaced by this checkpoint.
+    """
     if not 0.0 <= confidence <= 1.0:
         raise ValueError(f"confidence must be between 0.0 and 1.0, got {confidence}")
 
     path = _checkpoint_path(vault, session_id, backend)
+    for old in supersedes or []:
+        _note_path(old, vault, backend)  # fail before writing anything
     content = _render_checkpoint(
         _safe_session_id(session_id), agent, summary_md,
         open_items or [], decisions or [], entities or [], confidence, ttl_days,
@@ -257,7 +284,89 @@ def memory_checkpoint(
 
     relative = str(path.relative_to(vault))
     emit(NoteEvent(EventType.MODIFIED if existed else EventType.CREATED, relative))
+    for old in supersedes or []:
+        memory_supersede(old, relative, vault, backend=backend)
     return relative
+
+
+# --- memory_supersede ------------------------------------------------------
+
+def _note_path(ref: str, vault: Path, backend=None) -> Path:
+    """A vault-relative path, or a [[wikilink]] the backend resolves."""
+    ref = ref.strip()
+    if ref.startswith("[[") and ref.endswith("]]"):
+        target = backend.resolve_wikilink(ref[2:-2].split("|")[0].strip()) if backend else None
+        if target is None:
+            raise FileNotFoundError(f"No note for {ref}")
+        path = resolve_note_path(str(target.resolve().relative_to(vault.resolve())), vault)
+    else:
+        path = resolve_note_path(ref, vault)
+    if not path.is_file():
+        raise FileNotFoundError(f"No note at {ref}")
+    return path
+
+
+def _link(path: Path, backend=None) -> str:
+    key = backend.note_link_key(path, path.read_text()) if backend else path.stem
+    return f"[[{key}]]"
+
+
+def _set_frontmatter_field(content: str, key: str, value) -> str:
+    """Set *key* to *value* (written as a JSON scalar or flow list, which is YAML),
+    replacing any existing value, leaving the rest of the frontmatter as written."""
+    line = f"{key}: {json.dumps(value, ensure_ascii=False)}\n"
+    if not content.startswith("---\n"):
+        return f"---\n{line}---\n\n{content}"
+    end = content.find("\n---", 3)
+    if end == -1:
+        return f"---\n{line}---\n\n{content}"
+    lines = content[4:end + 1].splitlines(keepends=True)
+    kept, skipping = [], False
+    for existing in lines:
+        if existing.startswith(f"{key}:"):
+            skipping = True
+            continue
+        # A replaced block value continues on indented or "- " lines.
+        if skipping and existing[:1] in (" ", "\t", "-"):
+            continue
+        skipping = False
+        kept.append(existing)
+    return "---\n" + "".join(kept) + line + content[end + 1:]
+
+
+def memory_supersede(old: str, new: str, vault: Path, reason: str = "", backend=None) -> str:
+    """Mark note *old* replaced by note *new*, keeping both.
+
+    *old* gets ``superseded_by`` and a dated line with *reason*; *new* gets
+    *old* added to ``supersedes``. Each takes a path or a [[wikilink]].
+    """
+    from alaya.cache import _parse_frontmatter
+
+    old_path, new_path = _note_path(old, vault, backend), _note_path(new, vault, backend)
+    if old_path == new_path:
+        raise ValueError("A note cannot supersede itself")
+    first, second = sorted((old_path, new_path))  # one lock order, no deadlock
+    with get_path_lock(first), get_path_lock(second):
+        old_link, new_link = _link(old_path, backend), _link(new_path, backend)
+        old_text = _set_frontmatter_field(old_path.read_text(), "superseded_by", new_link)
+        note = f"Superseded by {new_link} on {datetime.now(UTC).date().isoformat()}"
+        if reason.strip():
+            note += f": {' '.join(reason.split())}"
+        old_text = old_text.rstrip("\n") + f"\n\n> {note}\n"
+
+        new_text = new_path.read_text()
+        listed = _parse_frontmatter(new_text).get("supersedes") or []
+        listed = [listed] if isinstance(listed, str) else [str(x) for x in listed]
+        if old_link not in listed:
+            new_text = _set_frontmatter_field(new_text, "supersedes", listed + [old_link])
+
+        atomic_write(old_path, old_text)
+        atomic_write(new_path, new_text)
+
+    old_rel, new_rel = str(old_path.relative_to(vault.resolve())), str(new_path.relative_to(vault.resolve()))
+    emit(NoteEvent(EventType.MODIFIED, old_rel))
+    emit(NoteEvent(EventType.MODIFIED, new_rel))
+    return f"{old_rel} superseded by {new_rel}"
 
 
 # --- memory_resume ---------------------------------------------------------
@@ -348,6 +457,7 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         include_types: list[str] | None = None,
         since: str = "",
         include_expired: bool = False,
+        include_superseded: bool = False,
     ) -> str:
         """Retrieve vault context for a query, trimmed to a token budget.
 
@@ -356,14 +466,16 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         directory with scope, to specific frontmatter types with
         include_types, or to notes modified on or after since (YYYY-MM-DD).
         Agent memory past its ttl_days is left out unless include_expired;
-        low-confidence memory ranks lower. The response ends with a
+        low-confidence memory ranks lower. Notes replaced via memory_supersede
+        are left out unless include_superseded. The response ends with a
         token_count comment.
         """
         try:
             return memory_recall(
                 query, vault, budget_tokens=budget_tokens, scope=scope or None,
                 include_types=include_types or None, since=since or None,
-                include_expired=include_expired, backend=backend, cache=cache,
+                include_expired=include_expired, include_superseded=include_superseded,
+                backend=backend, cache=cache,
             )
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
@@ -378,22 +490,42 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         entities: list[str] | None = None,
         confidence: float = 0.7,
         ttl_days: int = 30,
+        supersedes: list[str] | None = None,
     ) -> str:
         """Persist an agent session summary to the vault as a durable checkpoint.
 
         Call this when compacting context or finishing a loop iteration.
         Entities are written as wikilinks so the checkpoint joins the note
         graph. Overwrites any previous checkpoint for the same session_id.
+        supersedes lists notes (paths or [[links]]) this checkpoint replaces.
         """
         try:
             path = memory_checkpoint(
                 session_id, agent, summary_md, vault,
                 open_items=open_items, decisions=decisions, entities=entities,
-                confidence=confidence, ttl_days=ttl_days, backend=backend,
+                confidence=confidence, ttl_days=ttl_days, supersedes=supersedes,
+                backend=backend,
             )
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))
         return f"Checkpoint saved: {path}"
+
+    @mcp.tool()
+    def memory_supersede_tool(old: str, new: str, reason: str = "") -> str:
+        """Mark note old as replaced by note new, keeping both for history.
+
+        Use when a decision or fact changes: memory_recall then returns new
+        and leaves old out. Takes vault paths or [[wikilinks]]; the reason is
+        appended to old.
+        """
+        try:
+            return memory_supersede(old, new, vault, reason=reason, backend=backend)
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(INVALID_ARGUMENT, str(e))
 
     @mcp.tool()
     def memory_resume_tool(

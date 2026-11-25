@@ -249,6 +249,7 @@ compacted, and a way to rebuild working memory from a fresh context.
 | `memory_recall` | Retrieve vault context for a query, trimmed to a token budget. Returns chunk text directly — no follow-up `get_note` per hit |
 | `memory_checkpoint` | Persist a session summary, decisions, open items, and entities to `agents/<session>/checkpoint.md` as `type: agent-memory` |
 | `memory_resume` | Return the latest checkpoint plus its 1-hop linked notes, budgeted — the handoff document a fresh iteration starts from |
+| `memory_supersede` | Mark an old note replaced by a new one (`superseded_by` / `supersedes` wikilinks in frontmatter) instead of overwriting it; recall then skips the old note unless `include_superseded=True` |
 
 Every response ends with a `<!-- token_count: N -->` comment so a caller can do
 its own budget accounting. Entities passed to `memory_checkpoint` are written as

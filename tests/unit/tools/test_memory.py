@@ -12,6 +12,7 @@ from alaya.tools.memory import (
     memory_checkpoint,
     memory_recall,
     memory_resume,
+    memory_supersede,
     _safe_session_id,
 )
 
@@ -240,6 +241,98 @@ class TestMemoryRecallFreshness:
         assert "(score 0.50)" in out and "(score 0.90)" in out
 
 
+def _note(vault: Path, rel: str, body: str = "body", fm: str | None = None) -> str:
+    """A note titled as its file stem, so its link key is the same on zk and Obsidian."""
+    path = vault / rel
+    fm = fm if fm is not None else f"title: {path.stem}\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{fm}---\n\n{body}\n")
+    return rel
+
+
+class TestMemorySupersede:
+    """#171: mark old memory replaced instead of overwriting it."""
+
+    def test_recall_returns_new_not_old(self, vault: Path, backend) -> None:
+        _note(vault, "decisions/db-old.md", "Use MySQL.")
+        _note(vault, "decisions/db-new.md", "Use Postgres.")
+        memory_supersede("decisions/db-old.md", "decisions/db-new.md", vault,
+                         reason="MySQL lacks\nwhat we need", backend=backend)
+        fake = [
+            {"path": "decisions/db-old.md", "title": "Old", "score": 0.9, "text": "Use MySQL."},
+            {"path": "decisions/db-new.md", "title": "New", "score": 0.8, "text": "Use Postgres."},
+        ]
+        out = _recall(vault, backend, fake)
+        assert "db-new.md" in out and "db-old.md" not in out
+
+        both = _recall(vault, backend, fake, include_superseded=True)
+        assert "`decisions/db-old.md` (score 0.90) — superseded by [[db-new]]" in both
+        assert "db-new.md" in both
+
+    def test_writes_valid_frontmatter_both_ways(self, vault: Path, backend) -> None:
+        import yaml
+
+        _note(vault, "a.md", fm="title: a\ntags:\n  - x\n")
+        _note(vault, "b.md", fm='title: b\nsupersedes: ["[[z]]"]\n')
+        memory_supersede("a.md", "[[b]]", vault, reason="changed", backend=backend)
+        memory_supersede("a.md", "b.md", vault, backend=backend)  # idempotent on the list
+
+        a, b = (vault / "a.md").read_text(), (vault / "b.md").read_text()
+        meta_a = yaml.safe_load(a.split("---")[1])
+        meta_b = yaml.safe_load(b.split("---")[1])
+        assert meta_a == {"title": "a", "tags": ["x"], "superseded_by": "[[b]]"}
+        assert meta_b["supersedes"] == ["[[z]]", "[[a]]"]
+        assert "> Superseded by [[b]] on " in a and ": changed" in a
+
+    def test_links_resolve_in_graph(self, vault: Path, backend) -> None:
+        _note(vault, "a.md")
+        _note(vault, "b.md")
+        memory_supersede("a.md", "b.md", vault, backend=backend)
+        assert backend.resolve_wikilink("b").resolve() == (vault / "b.md").resolve()
+        assert backend.resolve_wikilink("a").resolve() == (vault / "a.md").resolve()
+        from alaya.index.graph_rag import _WIKILINK_RE
+        assert "b" in _WIKILINK_RE.findall((vault / "a.md").read_text())
+        assert "a" in _WIKILINK_RE.findall((vault / "b.md").read_text())
+
+    def test_note_without_frontmatter_gets_one(self, vault: Path, backend) -> None:
+        (vault / "plain.md").write_text("# Plain\n\ntext\n")  # no frontmatter
+        _note(vault, "b.md")
+        memory_supersede("plain.md", "b.md", vault, backend=backend)
+        assert (vault / "plain.md").read_text().startswith('---\nsuperseded_by: "[[b]]"\n---\n\n# Plain')
+
+    def test_rejects_self_missing_and_escaping(self, vault: Path, backend) -> None:
+        _note(vault, "a.md")
+        with pytest.raises(ValueError):
+            memory_supersede("a.md", "a.md", vault, backend=backend)
+        with pytest.raises(FileNotFoundError):
+            memory_supersede("a.md", "nope.md", vault, backend=backend)
+        with pytest.raises(ValueError):
+            memory_supersede("../outside.md", "a.md", vault, backend=backend)
+
+    def test_emits_events_for_both(self, vault: Path, backend) -> None:
+        from alaya.events import on_note_change, _listeners
+        _note(vault, "a.md")
+        _note(vault, "b.md")
+        seen = []
+        on_note_change(seen.append)
+        try:
+            memory_supersede("a.md", "b.md", vault, backend=backend)
+        finally:
+            _listeners.remove(seen.append)
+        assert sorted(e.path for e in seen) == ["a.md", "b.md"]
+
+    def test_checkpoint_supersedes(self, vault: Path, backend) -> None:
+        _note(vault, "agents/old/checkpoint.md")
+        path = memory_checkpoint("new", "a", "s", vault, supersedes=["agents/old/checkpoint.md"], backend=backend)
+        assert 'superseded_by: "[[' in (vault / "agents/old/checkpoint.md").read_text()
+        assert "supersedes:" in (vault / path).read_text()
+
+    def test_checkpoint_with_missing_supersedes_writes_nothing(self, vault: Path, backend) -> None:
+        with pytest.raises(FileNotFoundError):
+            memory_checkpoint("new", "a", "s", vault, supersedes=["missing.md"], backend=backend)
+        assert not (vault / "agents/new/checkpoint.md").exists()
+
+
 class TestRegistration:
     @pytest.mark.asyncio
     async def test_tools_registered(self, vault: Path, backend) -> None:
@@ -250,6 +343,7 @@ class TestRegistration:
             "memory_recall_tool",
             "memory_checkpoint_tool",
             "memory_resume_tool",
+            "memory_supersede_tool",
         }
 
     @pytest.mark.asyncio
