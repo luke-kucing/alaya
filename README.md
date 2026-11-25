@@ -72,7 +72,23 @@ curl -H "Authorization: Bearer $ALAYA_HTTP_TOKEN" "http://127.0.0.1:7400/memory/
 # {"query": "release checklist", "results": [{"path": "...", "title": "...", "score": 0.83, "text": "..."}]}
 ```
 
-It runs the same search pipeline as `memory_recall`, returning one chunk per note. `k` must be between 1 and 20 and defaults to 3. It returns 503 when there is no vector index, and 401 without the token whenever `ALAYA_HTTP_TOKEN` is set. Prepend the `text` fields to the system prompt from your agent framework's before-model hook (for example a Google ADK `before_model_callback`). The ADK wiring itself is untested; see #191.
+It runs the same search pipeline as `memory_recall`, returning one chunk per note. `k` must be between 1 and 20 and defaults to 3. It returns 503 when there is no vector index, and 401 without the token whenever `ALAYA_HTTP_TOKEN` is set. Prepend the `text` fields to the system prompt from your agent framework's before-model hook (for example a Google ADK `before_model_callback`).
+
+To give a Google ADK agent the vault's tools over HTTP, point `McpToolset` at the server and pass the token as a header (tested with google-adk 2.15.1; see `tests/integration/test_adk_http.py`):
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.tools.mcp_tool.mcp_toolset import McpToolset, StreamableHTTPConnectionParams
+
+agent = LlmAgent(
+    name="notes_agent",
+    model="gemini-2.5-flash",
+    tools=[McpToolset(connection_params=StreamableHTTPConnectionParams(
+        url="http://127.0.0.1:7400/mcp",
+        headers={"Authorization": f"Bearer {ALAYA_HTTP_TOKEN}"},
+    ))],
+)
+```
 
 ### Running tests
 
