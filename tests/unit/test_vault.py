@@ -101,3 +101,33 @@ class TestRenderFrontmatter:
         meta = {"title": "My Note: Sub"}
         result = render_frontmatter(meta)
         assert 'title: "My Note: Sub"\n' in result
+
+
+TRICKY_TITLES = ["foo: bar", "#hashtag start", 'say "hi"', "back\\slash: x", "it's [odd]", "plain"]
+
+
+class TestTitleRoundTrip:
+    """#151: titles with YAML specials are quoted on write and unquoted on read."""
+
+    @pytest.mark.parametrize("title", TRICKY_TITLES)
+    def test_create_note_round_trips(self, tmp_path, title):
+        import yaml
+        from alaya.tools.write import create_note
+
+        rel = create_note(title, "ideas", [], "body", tmp_path)
+        content = (tmp_path / rel).read_text()
+        assert parse_note(content).title == title
+        fm = content.split("---")[1]
+        assert yaml.safe_load(fm)["title"] == title  # what zk/Obsidian see
+
+    @pytest.mark.parametrize("title", TRICKY_TITLES)
+    def test_rename_note_round_trips(self, tmp_path, title):
+        from alaya.tools.structure import rename_note
+        from alaya.tools.write import create_note
+
+        rel = create_note("start", "ideas", [], "body", tmp_path)
+        new_rel = rename_note(rel, title, tmp_path)
+        assert parse_note((tmp_path / new_rel).read_text()).title == title
+
+    def test_single_quoted_title_unquoted(self):
+        assert parse_note("---\ntitle: 'it''s'\n---\n").title == "it's"

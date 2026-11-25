@@ -12,7 +12,7 @@ from alaya.backend.protocol import (
     TagEntry,
     VaultConfig,
 )
-from alaya.vault import iter_vault_md
+from alaya.vault import _yaml_quote, iter_vault_md
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 
@@ -332,9 +332,9 @@ class ObsidianBackend:
             if isinstance(val, list):
                 lines.append(f"{key}:")
                 for item in val:
-                    lines.append(f"  - {item}")
+                    lines.append(f"  - {_yaml_quote(str(item))}")
             elif val:
-                lines.append(f"{key}: {val}")
+                lines.append(f"{key}: {_yaml_quote(str(val))}")
             else:
                 lines.append(f"{key}:")
         lines.append("---\n")

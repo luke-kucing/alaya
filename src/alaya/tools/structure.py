@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT, ALREADY_EXISTS
 from alaya.events import emit, NoteEvent, EventType
-from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md, parse_note
+from alaya.vault import _yaml_quote, _yaml_unquote, resolve_note_path, iter_vault_md as _iter_vault_md, parse_note
 from alaya.tools.write import _validate_directory, _slugify
 from alaya.tools._locks import get_path_lock, atomic_write
 from alaya.confirm import ConfirmError, guard
@@ -121,10 +121,7 @@ def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -
         else:
             # Legacy zk behavior: wikilink key is the frontmatter title
             fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-            old_key = fm_title_match.group(1).strip() if fm_title_match else src.stem
-            # Strip YAML quoting
-            if len(old_key) >= 2 and old_key[0] == old_key[-1] and old_key[0] in ('"', "'"):
-                old_key = old_key[1:-1]
+            old_key = _yaml_unquote(fm_title_match.group(1).strip()) if fm_title_match else src.stem
 
         new_slug = _slugify(new_title)
         # nosemgrep: semgrep.alaya-path-traversal -- src from resolve_note_path(), slug from _slugify()
@@ -133,7 +130,7 @@ def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -
             raise FileExistsError(f"A note already exists at {dest.relative_to(vault)}")
 
         # update frontmatter title then rename atomically
-        content = re.sub(r"^title:.*$", lambda m: f"title: {new_title}", content, count=1, flags=re.MULTILINE)
+        content = re.sub(r"^title:.*$", lambda m: f"title: {_yaml_quote(new_title)}", content, count=1, flags=re.MULTILINE)
         atomic_write(src, content)
         src.rename(dest)
 

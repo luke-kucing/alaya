@@ -28,7 +28,7 @@ def parse_note(content: str) -> NoteMeta:
                     key, _, val = line.partition(":")
                     raw_meta[key.strip()] = val.strip()
 
-    title = raw_meta.pop("title", "")
+    title = _yaml_unquote(raw_meta.pop("title", ""))
     date = raw_meta.pop("date", "")
     tags_raw = raw_meta.pop("tags", "")
 
@@ -48,6 +48,15 @@ def _yaml_quote(val: str) -> str:
     if _YAML_NEEDS_QUOTING.search(val):
         escaped = val.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
+    return val
+
+
+def _yaml_unquote(val: str) -> str:
+    """Inverse of _yaml_quote for a single-line scalar ('...' or "...")."""
+    if len(val) >= 2 and val[0] == val[-1] == '"':
+        return re.sub(r"\\(.)", r"\1", val[1:-1])
+    if len(val) >= 2 and val[0] == val[-1] == "'":
+        return val[1:-1].replace("''", "'")
     return val
 
 

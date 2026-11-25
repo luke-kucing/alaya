@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from fastmcp import FastMCP
 from alaya.config import get_vault_root
+from alaya.vault import _yaml_quote
 
 _INGESTIBLE_SUFFIXES = {".pdf", ".md", ".txt"}
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
@@ -137,7 +138,7 @@ def _index_content(
 
     # build a synthetic note-like string for chunking
     tag_line = " ".join(f"#{t}" for t in tags) if tags else ""
-    synthetic = f"---\ntitle: {title}\ndate: {date.today().isoformat()}\n---\n"
+    synthetic = f"---\ntitle: {_yaml_quote(title)}\ndate: {date.today().isoformat()}\n---\n"
     if tag_line:
         synthetic += f"{tag_line}\n\n"
     synthetic += text

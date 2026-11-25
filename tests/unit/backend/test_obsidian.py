@@ -288,3 +288,10 @@ class TestCachedResolveWikilink:
     def test_returns_none_for_unknown(self, cached_backend: ObsidianBackend) -> None:
         result = cached_backend.resolve_wikilink("nonexistent-note")
         assert result is None
+
+
+class TestRenderFrontmatterQuoting:
+    def test_special_values_round_trip_through_yaml(self, backend: ObsidianBackend) -> None:
+        meta = {"title": "foo: bar", "aliases": ["#x", "a: b"], "note": 'say "hi"'}
+        rendered = backend.render_frontmatter(meta)
+        assert backend.parse_frontmatter(rendered + "body\n") == meta
