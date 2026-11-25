@@ -73,7 +73,20 @@ def test_rename_emits_moved_then_linking_notes(vault: Path, events) -> None:
     rename_note("ideas/voice-capture.md", "audio-capture", vault)
     kinds = [(e.event_type, e.path) for e in events]
     assert kinds[0] == (EventType.MOVED, "ideas/audio-capture.md")
-    assert (EventType.MODIFIED, "ideas/linker.md") in kinds[1:]
+    # #188: the renamed note itself is re-indexed so its new title reaches the index
+    assert kinds[1] == (EventType.MODIFIED, "ideas/audio-capture.md")
+    assert (EventType.MODIFIED, "ideas/linker.md") in kinds[2:]
+
+
+def test_rename_reindexes_under_the_new_title(vault: Path, events) -> None:
+    """What the MODIFIED handler re-chunks carries the new title, not the old one."""
+    from alaya.index.embedder import chunk_note
+
+    rename_note("ideas/voice-capture.md", "Audio Capture", vault)
+    modified = _modified(events)[0]
+    chunks = chunk_note(modified, (vault / modified).read_text())
+    assert chunks and all(c.title == "Audio Capture" for c in chunks)
+    assert "From note: Audio Capture" in chunks[0].text
 
 
 def test_emitted_path_makes_the_watcher_skip(vault: Path, events) -> None:
