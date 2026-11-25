@@ -54,6 +54,8 @@ def find_and_replace_wikilinks(old_key: str, new_key: str, vault: Path) -> list[
                 if count:
                     atomic_write(md_file, new_content)
                     updated.append(str(md_file.relative_to(vault)))
+            if count:
+                emit(NoteEvent(EventType.MODIFIED, updated[-1]))
         except OSError as e:
             logger.warning("Skipping %s during wikilink update: %s", md_file, e)
     return updated
@@ -144,11 +146,13 @@ def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -
     else:
         new_key = new_title
 
-    # update all [[old_key]] -> [[new_key]] across vault
-    find_and_replace_wikilinks(old_key, new_key, vault)
-
+    # MOVED before the rewrite: the rewrite emits MODIFIED for linking notes,
+    # which may include dest itself, and must land after the index path moves
     new_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.MOVED, new_relative, old_path=relative_path))
+
+    # update all [[old_key]] -> [[new_key]] across vault
+    find_and_replace_wikilinks(old_key, new_key, vault)
     return new_relative
 
 

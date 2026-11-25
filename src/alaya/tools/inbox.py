@@ -6,6 +6,7 @@ from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, INVALID_ARGUMENT
 from alaya.tools._locks import get_path_lock, atomic_write
 from alaya.confirm import ConfirmError, guard
+from alaya.events import emit, NoteEvent, EventType
 
 _INBOX_FILENAME = "inbox.md"
 
@@ -25,6 +26,7 @@ def capture_to_inbox(text: str, vault: Path) -> str:
         separator = "\n" if existing.endswith("\n") else "\n"
         atomic_write(inbox, existing + separator + entry + "\n")
 
+    emit(NoteEvent(EventType.MODIFIED, _INBOX_FILENAME))
     return f"Captured: {entry}"
 
 
@@ -61,22 +63,17 @@ def clear_inbox_item(text: str, vault: Path) -> None:
     with get_path_lock(inbox):
         lines = inbox.read_text().splitlines(keepends=True)
 
-        # first pass: exact content match (strip timestamp prefix)
-        for i, line in enumerate(lines):
-            stripped = _TS_PREFIX.sub("", line.rstrip())
-            if stripped == text:
-                lines.pop(i)
-                atomic_write(inbox, "".join(lines))
-                return
-
+        # first pass: exact content match (strip timestamp prefix),
         # second pass: substring match fallback
-        for i, line in enumerate(lines):
-            if text in line:
-                lines.pop(i)
-                atomic_write(inbox, "".join(lines))
-                return
+        idx = next((i for i, line in enumerate(lines) if _TS_PREFIX.sub("", line.rstrip()) == text), None)
+        if idx is None:
+            idx = next((i for i, line in enumerate(lines) if text in line), None)
+        if idx is None:
+            raise ValueError(f"Inbox item not found: '{text}'")
+        lines.pop(idx)
+        atomic_write(inbox, "".join(lines))
 
-    raise ValueError(f"Inbox item not found: '{text}'")
+    emit(NoteEvent(EventType.MODIFIED, _INBOX_FILENAME))
 
 
 def preview_clear_inbox_item(text: str, vault: Path) -> str:

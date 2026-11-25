@@ -76,24 +76,20 @@ def complete_todo(
     with get_path_lock(note_path):
         lines = note_path.read_text().splitlines(keepends=True)
 
-        # try exact line first (1-indexed)
+        # try exact line first (1-indexed), then fuzzy ±5 lines around it
         exact_idx = line - 1
-        if 0 <= exact_idx < len(lines):
-            if _TODO_PATTERN.match(lines[exact_idx].strip()) and task_text in lines[exact_idx]:
-                lines[exact_idx] = lines[exact_idx].replace("- [ ]", "- [x]", 1)
-                atomic_write(note_path, "".join(lines))
-                return
+        candidates = [exact_idx] + list(range(max(0, exact_idx - 5), min(len(lines), exact_idx + 6)))
+        idx = next(
+            (i for i in candidates
+             if 0 <= i < len(lines) and _TODO_PATTERN.match(lines[i].strip()) and task_text in lines[i]),
+            None,
+        )
+        if idx is None:
+            raise ValueError(f"Task not found: '{task_text}' near line {line} in {path}")
+        lines[idx] = lines[idx].replace("- [ ]", "- [x]", 1)
+        atomic_write(note_path, "".join(lines))
 
-        # fuzzy fallback: search ±5 lines around the given line
-        search_start = max(0, exact_idx - 5)
-        search_end = min(len(lines), exact_idx + 6)
-        for i in range(search_start, search_end):
-            if _TODO_PATTERN.match(lines[i].strip()) and task_text in lines[i]:
-                lines[i] = lines[i].replace("- [ ]", "- [x]", 1)
-                atomic_write(note_path, "".join(lines))
-                return
-
-    raise ValueError(f"Task not found: '{task_text}' near line {line} in {path}")
+    emit(NoteEvent(EventType.MODIFIED, str(note_path.relative_to(vault.resolve()))))
 
 
 # --- Task ledger (#170) ---
