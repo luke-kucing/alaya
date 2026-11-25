@@ -3,6 +3,13 @@
 All notable changes to `alaya-mcp`. Versions follow [semantic versioning](https://semver.org/); while
 the major version is 0, a minor bump may break compatibility.
 
+## Unreleased
+
+### Fixed
+
+- Chunking splits any paragraph over 2048 tokens (by line, then by width), so one huge paragraph
+  no longer becomes a single chunk that takes 17 GB+ to embed. (#211)
+
 ## 0.3.0 — 2026-11-25
 
 ### Added
