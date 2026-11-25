@@ -16,7 +16,8 @@ classifiers = [
     "Topic :: Text Processing :: General",
 ]
 dependencies = [
-    "fastmcp>=3.0.2",
+    # <4: 4.x is a new major; migrate deliberately (see the fastmcp 4 ticket)
+    "fastmcp>=3.0.2,<4",
     "lancedb>=0.29",
     "pymupdf4llm>=0.0.17",
     "trafilatura>=2.0",
@@ -58,6 +59,8 @@ Issues = "https://github.com/luke-kucing/alaya/issues"
 
 [project.scripts]
 alaya = "alaya.server:main"
+# same entry point under the package name, so `uvx alaya-mcp` works
+alaya-mcp = "alaya.server:main"
 
 [build-system]
 requires = ["hatchling"]
