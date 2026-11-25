@@ -183,6 +183,10 @@ class TestHttpTransport:
 
 
 class TestToolMiddleware:
+    # whatever search_notes is registered as, so this survives tool renames (#150)
+    from alaya.server import _TRUNCATION_HINTS as HINTS
+    HINTED = next(k for k in HINTS if k.startswith("search_notes"))
+
     def _server(self, tmp_path: Path):
         from fastmcp import FastMCP
         from alaya.server import _ToolMiddleware
@@ -190,8 +194,8 @@ class TestToolMiddleware:
         mcp = FastMCP(name="alaya-test")
         mcp.add_middleware(_ToolMiddleware(tmp_path, tmp_path / "audit.jsonl"))
 
-        @mcp.tool
-        def search_notes_tool(query: str, unbounded: bool = False) -> str:
+        @mcp.tool(name=self.HINTED)
+        def search(query: str, unbounded: bool = False) -> str:
             return "word " * 2000
 
         @mcp.tool
@@ -217,16 +221,16 @@ class TestToolMiddleware:
 
     def test_caps_text_and_structured_result(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
-        r = self._call(self._server(tmp_path), "search_notes_tool", {"query": "q"})
+        r = self._call(self._server(tmp_path), self.HINTED, {"query": "q"})
         text = r.content[0].text
-        assert "truncated" in text and "narrow the query" in text and "<!-- token_count:" in text
+        assert "truncated" in text and self.HINTS[self.HINTED] in text and "<!-- token_count:" in text
         assert r.structured_content == {"result": text}
         [entry] = self._audit(tmp_path)
-        assert entry["tool"] == "search_notes_tool" and entry["status"] == "ok"
+        assert entry["tool"] == self.HINTED and entry["status"] == "ok"
 
     def test_unbounded_bypasses_cap(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setenv("ALAYA_MAX_TOOL_OUTPUT_TOKENS", "100")
-        r = self._call(self._server(tmp_path), "search_notes_tool", {"query": "q", "unbounded": True})
+        r = self._call(self._server(tmp_path), self.HINTED, {"query": "q", "unbounded": True})
         assert "truncated" not in r.content[0].text
 
     def test_exception_is_audited_as_error(self, tmp_path: Path) -> None:
