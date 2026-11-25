@@ -1,0 +1,60 @@
+# Changelog
+
+All notable changes to `alaya-mcp`. Versions follow [semantic versioning](https://semver.org/); while
+the major version is 0, a minor bump may break compatibility.
+
+## 0.2.0 — unreleased
+
+### Breaking
+
+- **Tools are registered under bare names**: `search_notes`, `get_note`, ... instead of
+  `search_notes_tool`, `get_note_tool`. Update any client allowlist or permission rule that
+  names tools (for example `mcp__alaya__search_notes_tool` → `mcp__alaya__search_notes`).
+  Profiles accept either spelling. (#150)
+- **Destructive tools are two-phase server-side**: the first call to `delete_note`, `move_note`,
+  `rename_note`, `replace_section`, `clear_inbox_item` or `reindex_vault` returns a preview and a
+  token; repeat the call with `confirm_token` to execute. `ALAYA_CONFIRM_MODE=off` restores the
+  old behaviour. (#166)
+
+### Added
+
+- **Agent memory**: `memory_recall` (budgeted retrieval that returns chunk text), `memory_checkpoint`,
+  `memory_resume` (#164). Recall honours `ttl_days`, `confidence` and `since` (#169).
+  `memory_supersede` marks old memory as replaced instead of overwriting it (#171).
+  `memory_stale` plus a `gardener` profile for scheduled upkeep (#172).
+- **Task ledger**: `create_task`, `ready_tasks`, `claim_task`, `renew_task`, `release_task`.
+  Claims are leases with exactly one winner across processes. (#170)
+- **Streamable HTTP transport**: `alaya --http HOST:PORT`, with optional bearer auth via
+  `ALAYA_HTTP_TOKEN`, so one server can serve many clients. (#157)
+- **Tool profiles**: `--profile` / `ALAYA_TOOL_PROFILE` registers only the tools a role needs.
+  Built-ins include `readonly`, `orchestrator` and `gardener`, and custom profiles can be defined
+  in `alaya.toml`. (#165)
+- **Output budgets**: every response carries a `token_count` and is capped at
+  `ALAYA_MAX_TOOL_OUTPUT_TOKENS` (default 4000); `get_note` pages long notes. (#167)
+- `search_notes` results include a one-line snippet of the matching chunk. (#145)
+- `alaya-mcp` console script, so `uvx alaya-mcp` (the README quickstart) works. `alaya` still works.
+- LongMemEval retrieval eval harness: `make eval`. (#173)
+
+### Fixed
+
+- Edits, todo completion, inbox capture and wikilink rewrites update the search index immediately
+  instead of waiting for the file watcher. (#149)
+- Titles containing `:`, `#` or quotes are YAML-quoted in frontmatter and read back correctly. (#151)
+- `append_to_note(section_header=...)` matches headers case-insensitively. (#152)
+- Failed tool calls, including argument-validation errors, are written to the audit log. (#153)
+- Indexing kept `note_type`, so agent memory is excluded from search as intended (#178).
+  **Reindex existing vaults** (`reindex_vault` with `force=True`) to apply this to notes indexed
+  before the fix (#189).
+- `fastmcp` is capped below 4. An unbounded pin let fresh installs pull fastmcp 4. (#194)
+
+### Security
+
+- Locked dependencies upgraded: the lock carried 201 known vulnerabilities in 22 packages because
+  the CI audit was scanning the wrong environment. (#194)
+- GitHub Actions hardened: actions pinned to SHAs, least-privilege permissions, and publishing only
+  from version tags through a reviewer-gated environment. CI audits the real lock and smoke-tests
+  the built wheel. (#144)
+
+## 0.1.0
+
+First release on PyPI.
