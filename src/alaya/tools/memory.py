@@ -11,7 +11,7 @@ Notes written here carry frontmatter ``type: agent-memory`` so that
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -68,6 +68,8 @@ def memory_recall(
     budget_tokens: int = DEFAULT_RECALL_BUDGET,
     scope: str | None = None,
     include_types: list[str] | None = None,
+    since: str | None = None,
+    include_expired: bool = False,
     backend=None,
     cache=None,
 ) -> str:
@@ -75,7 +77,8 @@ def memory_recall(
 
     Runs the same routed + corrective search pipeline as ``search_notes`` and
     returns the matching chunk text, so the caller does not need a follow-up
-    ``get_note`` per hit.
+    ``get_note`` per hit. Agent memory past its ``ttl_days`` is dropped unless
+    *include_expired*, and its score is weighted by its ``confidence``.
     """
     if budget_tokens <= 0:
         raise ValueError("budget_tokens must be positive")
@@ -92,8 +95,9 @@ def memory_recall(
     # Recall is for agents, so agent memory is *included* unless narrowed.
     results = _run_corrective_search(
         query, vault, directory=scope or None, limit=20,
-        include_types=include_types or None, exclude_types=None,
+        include_types=include_types or None, exclude_types=None, since=since or None,
     )
+    results = _weigh_memory(results, vault, include_expired)
     if not results:
         return _envelope(f"No vault context found for: {query}", sources=0)
 
@@ -133,6 +137,51 @@ def memory_recall(
 
     body = f"## Recall: {query}\n\n" + "\n\n".join(blocks)
     return _envelope(body, sources=len(blocks))
+
+
+def _memory_weight(path: Path, now: datetime, include_expired: bool) -> float | None:
+    """Score multiplier for a hit: its confidence if it is agent memory, else 1.
+
+    None when it is agent memory past ``updated + ttl_days``.
+    """
+    from alaya.cache import _parse_frontmatter
+
+    try:
+        meta = _parse_frontmatter(path.read_text())
+    except OSError:
+        return 1.0
+    if meta.get("type") != AGENT_MEMORY_TYPE:
+        return 1.0
+    if not include_expired:
+        try:
+            updated = datetime.fromisoformat(meta["updated"])
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=UTC)
+            if updated + timedelta(days=float(meta["ttl_days"])) < now:
+                return None
+        except (KeyError, ValueError):
+            pass  # no usable ttl: never expires
+    try:
+        return min(1.0, max(0.0, float(meta["confidence"])))
+    except (KeyError, ValueError):
+        return 1.0
+
+
+def _weigh_memory(results: list[dict], vault: Path, include_expired: bool) -> list[dict]:
+    """Drop expired agent memory and weight the rest by confidence."""
+    now = datetime.now(UTC)
+    weights: dict[str, float | None] = {}
+    out = []
+    for r in results:
+        if r["path"] not in weights:
+            weights[r["path"]] = _memory_weight(vault / r["path"], now, include_expired)
+        w = weights[r["path"]]
+        if w is None:
+            continue
+        out.append(r if w == 1.0 else {**r, "score": r["score"] * w})
+    if any(w not in (None, 1.0) for w in weights.values()):
+        out.sort(key=lambda r: r["score"], reverse=True)
+    return out
 
 
 # --- memory_checkpoint -----------------------------------------------------
@@ -297,18 +346,24 @@ def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
         budget_tokens: int = DEFAULT_RECALL_BUDGET,
         scope: str = "",
         include_types: list[str] | None = None,
+        since: str = "",
+        include_expired: bool = False,
     ) -> str:
         """Retrieve vault context for a query, trimmed to a token budget.
 
         One call instead of search-then-read-each-hit: returns the matching
         chunk text directly, never exceeding budget_tokens. Restrict to a
-        directory with scope, or to specific frontmatter types with
-        include_types. The response ends with a token_count comment.
+        directory with scope, to specific frontmatter types with
+        include_types, or to notes modified on or after since (YYYY-MM-DD).
+        Agent memory past its ttl_days is left out unless include_expired;
+        low-confidence memory ranks lower. The response ends with a
+        token_count comment.
         """
         try:
             return memory_recall(
                 query, vault, budget_tokens=budget_tokens, scope=scope or None,
-                include_types=include_types or None, backend=backend, cache=cache,
+                include_types=include_types or None, since=since or None,
+                include_expired=include_expired, backend=backend, cache=cache,
             )
         except ValueError as e:
             return error(INVALID_ARGUMENT, str(e))

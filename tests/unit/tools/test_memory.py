@@ -183,6 +183,63 @@ class TestRecall:
         assert mock.call_args.kwargs["exclude_types"] is None
 
 
+def _memory_note(vault: Path, rel: str, *, updated: str, ttl_days: int, confidence: float) -> None:
+    path = vault / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\ntype: agent-memory\nconfidence: {confidence}\nttl_days: {ttl_days}\n"
+        f"updated: {updated}\n---\n\nbody\n"
+    )
+
+
+def _recall(vault: Path, backend, fake: list[dict], **kw) -> str:
+    with patch("alaya.tools.search._hybrid_search_available", return_value=True), \
+         patch("alaya.tools.search._run_corrective_search", return_value=fake):
+        return memory_recall("q", vault, budget_tokens=2000, backend=backend, **kw)
+
+
+class TestMemoryRecallFreshness:
+    """#169: recall honors ttl_days, confidence and since."""
+
+    def test_expired_checkpoint_excluded_unless_asked(self, vault: Path, backend) -> None:
+        _memory_note(vault, "agents/old/checkpoint.md",
+                     updated="2025-01-01T00:00:00+00:00", ttl_days=30, confidence=0.9)
+        fake = [{"path": "agents/old/checkpoint.md", "title": "Old", "score": 0.9, "text": "old"}]
+        assert "agents/old/checkpoint.md" not in _recall(vault, backend, fake)
+        assert "agents/old/checkpoint.md" in _recall(vault, backend, fake, include_expired=True)
+
+    def test_fresh_checkpoint_kept(self, vault: Path, backend) -> None:
+        path = memory_checkpoint("s1", "a", "summary", vault, ttl_days=1, backend=backend)
+        fake = [{"path": path, "title": "C", "score": 0.9, "text": "summary"}]
+        assert path in _recall(vault, backend, fake)
+
+    def test_higher_confidence_ranks_first(self, vault: Path, backend) -> None:
+        now = "2099-01-01T00:00:00+00:00"
+        _memory_note(vault, "agents/low/checkpoint.md", updated=now, ttl_days=30, confidence=0.2)
+        _memory_note(vault, "agents/high/checkpoint.md", updated=now, ttl_days=30, confidence=0.95)
+        fake = [
+            {"path": "agents/low/checkpoint.md", "title": "Low", "score": 0.8, "text": "x"},
+            {"path": "agents/high/checkpoint.md", "title": "High", "score": 0.8, "text": "y"},
+        ]
+        out = _recall(vault, backend, fake)
+        assert out.index("agents/high/") < out.index("agents/low/")
+
+    def test_since_passed_to_search(self, vault: Path, backend) -> None:
+        with patch("alaya.tools.search._hybrid_search_available", return_value=True), \
+             patch("alaya.tools.search._run_corrective_search", return_value=[]) as mock:
+            memory_recall("q", vault, since="2026-11-01", backend=backend)
+        assert mock.call_args.kwargs["since"] == "2026-11-01"
+
+    def test_ordinary_notes_rank_as_before(self, vault: Path, backend) -> None:
+        fake = [
+            {"path": "ideas/b.md", "title": "B", "score": 0.5, "text": "b"},
+            {"path": "ideas/a.md", "title": "A", "score": 0.9, "text": "a"},
+        ]
+        out = _recall(vault, backend, fake)
+        assert out.index("ideas/b.md") < out.index("ideas/a.md")
+        assert "(score 0.50)" in out and "(score 0.90)" in out
+
+
 class TestRegistration:
     @pytest.mark.asyncio
     async def test_tools_registered(self, vault: Path, backend) -> None:
