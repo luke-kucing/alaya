@@ -37,7 +37,8 @@ RESULTS = HERE.parent / "results"
 logger = logging.getLogger("longmemeval")
 # Pipeline stages memory_recall can toggle; each is keyless (template HyDE,
 # local cross-encoder). memory_recall has no graph expansion to toggle.
-VARIANTS = {"base": {}, "hyde": {"hyde": True}, "rerank": {"rerank": True}}
+# "threshold" overrides corrective.filter_relevant's cutoff (#190: the 0.2 default drops gold hits).
+VARIANTS = {"base": {}, "hyde": {"hyde": True}, "rerank": {"rerank": True}, "base-t0": {"threshold": 0.0}}
 
 _RECALLED_RE = re.compile(r"`sessions/([^`]+)\.md`")
 
@@ -115,6 +116,7 @@ def markdown(summary: dict, meta: dict) -> str:
 
 
 def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> list[dict]:
+    from alaya.index import corrective as corrective_mod
     from alaya.index.reindex import reindex_all
     from alaya.index.store import get_store, reset_store
     from alaya.tools import search
@@ -130,8 +132,13 @@ def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> 
             (vault / "sessions" / f"{note_name(sid)}.md").write_text(session_note(sid, when, turns))
         reindex_all(vault, get_store(vault))
         corrective = search._run_corrective_search
+        relevant = corrective_mod.filter_relevant
         for variant, opts in variants.items():
-            with patch.object(search, "_run_corrective_search", partial(corrective, **opts)):
+            opts = dict(opts)
+            threshold = opts.pop("threshold", None)
+            filt = relevant if threshold is None else partial(relevant, threshold=threshold)
+            with patch.object(search, "_run_corrective_search", partial(corrective, **opts)), \
+                 patch.object(corrective_mod, "filter_relevant", filt):
                 for budget in budgets:
                     out = memory_recall(entry["question"], vault, budget_tokens=budget)
                     rows.append({
