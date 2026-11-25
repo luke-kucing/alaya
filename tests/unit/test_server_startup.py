@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from alaya import server
 from alaya.server import _maybe_start_reembed
 from alaya.backend.zk import ZkBackend
 from alaya.backend.protocol import VaultConfig, LinkResolution
@@ -171,3 +172,49 @@ class TestResponseShaping:
         for name in _TRUNCATION_HINTS:
             params = by_name[name].parameters["properties"]
             assert "unbounded" in params, f"{name} is hinted but cannot be unbounded"
+
+
+# --- Streamable HTTP transport (#157) ---
+
+
+
+_INIT = {
+    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+    "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+               "clientInfo": {"name": "t", "version": "0"}},
+}
+_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+
+
+class TestHttpTransport:
+    def test_parses_host_port(self) -> None:
+        assert server._parse_args(["--http", "127.0.0.1:7400"]).http == ("127.0.0.1", 7400)
+        assert server._parse_args(["--http", "[::1]:7400"]).http == ("::1", 7400)
+        assert server._parse_args([]).http is None
+
+    @pytest.mark.parametrize("bad", ["7400", "host:", "host:99999", ":7400"])
+    def test_rejects_bad_address(self, bad: str) -> None:
+        with pytest.raises(SystemExit):
+            server._parse_args(["--http", bad])
+
+    def test_token_required_when_set(self, monkeypatch) -> None:
+        from starlette.testclient import TestClient
+
+        monkeypatch.setenv("ALAYA_HTTP_TOKEN", "s3cret")
+        monkeypatch.setattr(server.mcp, "auth", None)
+        server._configure_http_auth("0.0.0.0")
+        with TestClient(server.mcp.http_app()) as c:
+            assert c.post("/mcp", json=_INIT, headers=_HEADERS).status_code == 401
+            bad = {**_HEADERS, "Authorization": "Bearer wrong"}
+            assert c.post("/mcp", json=_INIT, headers=bad).status_code == 401
+            ok = {**_HEADERS, "Authorization": "Bearer s3cret"}
+            assert c.post("/mcp", json=_INIT, headers=ok).status_code == 200
+
+    def test_warns_on_open_lan_bind(self, monkeypatch, caplog) -> None:
+        monkeypatch.delenv("ALAYA_HTTP_TOKEN", raising=False)
+        monkeypatch.setattr(server.mcp, "auth", None)
+        server._configure_http_auth("127.0.0.1")
+        assert "ALAYA_HTTP_TOKEN" not in caplog.text
+        server._configure_http_auth("0.0.0.0")
+        assert "ALAYA_HTTP_TOKEN" in caplog.text
+        assert server.mcp.auth is None

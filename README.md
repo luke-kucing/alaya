@@ -49,7 +49,19 @@ make serve
 ALAYA_VAULT_DIR=~/notes uv run alaya
 ```
 
-The server communicates over stdio (MCP protocol) — it's designed to be launched by Claude Code, not run in a browser.
+By default the server communicates over stdio (MCP protocol): each client launches its own server process.
+
+### One server, many clients (Streamable HTTP)
+
+```bash
+ALAYA_VAULT_DIR=~/notes ALAYA_HTTP_TOKEN=$(openssl rand -hex 32) uv run alaya --http 127.0.0.1:7400
+```
+
+Clients connect to `http://127.0.0.1:7400/mcp` with `Authorization: Bearer <token>`. Every client shares one process, so there is one file watcher, one index and one cache however many agents connect. `--profile` applies to all of them.
+
+To reach the vault from another machine on your LAN, bind to that interface (`--http 192.168.1.20:7400`) and **always set `ALAYA_HTTP_TOKEN`**. alaya logs a warning if it binds beyond loopback without one.
+
+> **Never expose this port to the public internet.** Any client with the token can read, rewrite and delete every note. Traffic is plain HTTP: the token and your notes cross the network unencrypted, so keep it to a trusted LAN or put it behind a VPN (WireGuard, Tailscale) or a TLS-terminating reverse proxy.
 
 ### Running tests
 
@@ -429,6 +441,7 @@ Directory names are configurable via `alaya.toml` (see Configuration below). Not
 | `ALAYA_VAULT_DIR` | Yes | Path to your vault (e.g. `~/notes`) |
 | `ZK_NOTEBOOK_DIR` | Compat | Backward-compatible alias for `ALAYA_VAULT_DIR` |
 | `ALAYA_EMBEDDING_MODEL` | No | Embedding model variant (`nomic-v1.5` or `nomic-v1.5-q4`, default: `nomic-v1.5`) |
+| `ALAYA_HTTP_TOKEN` | No | Bearer token required by `--http` clients. Set it whenever the server binds beyond loopback |
 | `ALAYA_TOOL_PROFILE` | No | Limit which tools are exposed (`librarian`, `orchestrator`, `readonly`, or a profile from `alaya.toml`; default: `librarian`) |
 | `ALAYA_CONFIRM_MODE` | No | Server-side confirmation for destructive tools: `required` (default), `optional`, `off` |
 | `ALAYA_CONFIRM_TTL` | No | Seconds a confirm token stays valid (default: `60`) |
