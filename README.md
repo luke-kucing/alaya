@@ -63,6 +63,17 @@ To reach the vault from another machine on your LAN, bind to that interface (`--
 
 > **Never expose this port to the public internet.** Any client with the token can read, rewrite and delete every note. Traffic is plain HTTP: the token and your notes cross the network unencrypted, so keep it to a trusted LAN or put it behind a VPN (WireGuard, Tailscale) or a TLS-terminating reverse proxy.
 
+#### Pre-flight memory context: `GET /memory/context`
+
+In HTTP mode, middleware can fetch vault context before the model's turn without a tool call:
+
+```bash
+curl -H "Authorization: Bearer $ALAYA_HTTP_TOKEN" "http://127.0.0.1:7400/memory/context?q=release+checklist&k=3"
+# {"query": "release checklist", "results": [{"path": "...", "title": "...", "score": 0.83, "text": "..."}]}
+```
+
+It runs the same search pipeline as `memory_recall`, returning one chunk per note. `k` must be between 1 and 20 and defaults to 3. It returns 503 when there is no vector index, and 401 without the token whenever `ALAYA_HTTP_TOKEN` is set. Prepend the `text` fields to the system prompt from your agent framework's before-model hook (for example a Google ADK `before_model_callback`). The ADK wiring itself is untested; see #191.
+
 ### Running tests
 
 ```bash

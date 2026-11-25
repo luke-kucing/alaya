@@ -11,8 +11,10 @@ Notes written here carry frontmatter ``type: agent-memory`` so that
 """
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -591,9 +593,53 @@ def _linked_notes(content: str, vault: Path, backend=None) -> list[tuple[str, st
     return out
 
 
+# --- GET /memory/context (HTTP mode) ----------------------------------------
+
+_MAX_CONTEXT_K = 20
+
+
+async def _memory_context_http(request, vault: Path):
+    """``GET /memory/context?q=...&k=3``: top-k chunks as JSON for pre-flight middleware (#146).
+
+    fastmcp's ``mcp.auth`` does not cover custom routes, so ALAYA_HTTP_TOKEN is checked here.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import JSONResponse
+
+    token = os.environ.get("ALAYA_HTTP_TOKEN", "").strip()
+    if token:
+        given = request.headers.get("authorization", "").encode()
+        if not hmac.compare_digest(given, f"Bearer {token}".encode()):
+            return JSONResponse(
+                {"error": "unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"}
+            )
+    query = request.query_params.get("q", "").strip()
+    try:
+        k = int(request.query_params.get("k", "3"))
+    except ValueError:
+        k = 0
+    if not query or not 1 <= k <= _MAX_CONTEXT_K:
+        return JSONResponse({"error": f"need q and an integer k in 1..{_MAX_CONTEXT_K}"}, status_code=400)
+
+    results = await run_in_threadpool(get_memory_context, query, vault, k)
+    if results is None:
+        return JSONResponse({"error": "no vector index; call vault_health"}, status_code=503)
+    rows = []
+    for r in results:
+        row = {"path": r["path"], "title": r["title"], "score": float(r["score"]), "text": r.get("text", "")}
+        if r.get("superseded_by"):
+            row["superseded_by"] = r["superseded_by"]
+        rows.append(row)
+    return JSONResponse({"query": query, "results": rows})
+
+
 # --- FastMCP tool registration ---------------------------------------------
 
 def _register(mcp: FastMCP, vault: Path, backend=None, cache=None) -> None:
+    @mcp.custom_route("/memory/context", methods=["GET"])
+    async def memory_context_route(request):
+        return await _memory_context_http(request, vault)
+
     @mcp.tool(name="memory_recall")
     def memory_recall_tool(
         query: str,
