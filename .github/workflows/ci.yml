@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, dev]
 
+# Least privilege: no job here writes to the repo.
+permissions:
+  contents: read
+
+# Actions are pinned to commit SHAs (tags can be moved); Dependabot keeps them current.
 jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -16,18 +21,20 @@ jobs:
         python-version: ["3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
         with:
-          version: "latest"
+          version: "0.13.10"
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: Run tests
         run: uv run pytest -x --tb=short -q -m "not integration"
@@ -37,33 +44,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
         with:
-          version: "latest"
+          version: "0.13.10"
 
-      - name: Install dependencies
-        run: uv sync --no-dev
-
-      - name: Install pip-audit
-        run: uv tool install pip-audit
+      # Audit the locked runtime dependencies (all extras), not pip-audit's own environment.
+      - name: Export locked requirements
+        run: uv export --frozen --no-dev --all-extras --no-emit-project --format requirements-txt -o requirements.lock.txt
 
       - name: Run pip-audit
-        run: uv tool run pip-audit --progress-spinner off
+        run: uvx pip-audit==2.10.1 --progress-spinner off --disable-pip --require-hashes -r requirements.lock.txt
 
   wheel:
     name: Installed wheel smoke
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
         with:
-          version: "latest"
+          version: "0.13.10"
 
       - name: Build sdist and wheel
         run: uv build

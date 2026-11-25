@@ -162,6 +162,7 @@ def get_note_by_title(
         rel = cache.title_to_path(title)
         if not rel:
             raise FileNotFoundError(f"No note found with title: {title!r}")
+        # nosemgrep: semgrep.alaya-path-traversal -- rel comes from the cache's vault scan, not the caller
         path = vault / rel
         return _format_note(
             rel, path.read_text(), offset=offset, limit=limit, unbounded=unbounded

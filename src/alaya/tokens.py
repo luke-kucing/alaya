@@ -28,6 +28,7 @@ def _get_encoder():
         import tiktoken
         _encoder = tiktoken.get_encoding(name)
     except Exception as e:
+        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure -- 'token' here means LLM tokens
         logger.info("tiktoken unavailable (%s) — using word-based token approximation", e)
         _encoder = None
     return _encoder

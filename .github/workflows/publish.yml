@@ -1,9 +1,13 @@
 name: Publish to PyPI
 
+# Only a pushed release tag publishes. No workflow_dispatch: a manual run could
+# upload an arbitrary commit. The `pypi` environment adds a required reviewer.
 on:
   push:
-    tags: ["v*"]
-  workflow_dispatch:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -15,18 +19,21 @@ jobs:
         python-version: ["3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
         with:
-          version: "latest"
+          version: "0.13.10"
+          enable-cache: false  # never restore a cache into a release build
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
       - name: Run tests
         run: uv run pytest -x --tb=short -q -m "not integration"
@@ -37,12 +44,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
         with:
-          version: "latest"
+          version: "0.13.10"
+          enable-cache: false  # never restore a cache into a release build
+
+      - name: Tag must match the pyproject version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(uv version --short)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match pyproject version $version"
+            exit 1
+          fi
 
       - name: Build sdist and wheel
         run: uv build
@@ -51,7 +71,7 @@ jobs:
         run: uv run --isolated --no-project --python 3.12 --with dist/*.whl python scripts/smoke_installed.py vault_fixture
 
       - name: Upload dist artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: dist
           path: dist/
@@ -62,14 +82,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write
+      id-token: write  # trusted publishing (OIDC); also signs PEP 740 attestations
 
     steps:
       - name: Download dist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3

@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned actions (and their version comments) current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Locked Python dependencies (uv.lock); security fixes arrive as they are published.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
