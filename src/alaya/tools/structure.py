@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 from fastmcp import FastMCP
 from alaya.errors import error, NOT_FOUND, OUTSIDE_VAULT, INVALID_ARGUMENT, ALREADY_EXISTS
 from alaya.events import emit, NoteEvent, EventType
-from alaya.vault import resolve_note_path, iter_vault_md as _iter_vault_md, parse_note
+from alaya.vault import _yaml_quote, _yaml_unquote, resolve_note_path, iter_vault_md as _iter_vault_md, parse_note
 from alaya.tools.write import _validate_directory, _slugify
 from alaya.tools._locks import get_path_lock, atomic_write
 from alaya.confirm import ConfirmError, guard
@@ -116,15 +116,7 @@ def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -
             raise FileNotFoundError(f"Note not found: {relative_path}")
         content = src.read_text()
 
-        if backend:
-            old_key = backend.note_link_key(src, content)
-        else:
-            # Legacy zk behavior: wikilink key is the frontmatter title
-            fm_title_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-            old_key = fm_title_match.group(1).strip() if fm_title_match else src.stem
-            # Strip YAML quoting
-            if len(old_key) >= 2 and old_key[0] == old_key[-1] and old_key[0] in ('"', "'"):
-                old_key = old_key[1:-1]
+        old_key = _wikilink_key_for(src, content, backend)
 
         new_slug = _slugify(new_title)
         # nosemgrep: semgrep.alaya-path-traversal -- src from resolve_note_path(), slug from _slugify()
@@ -133,7 +125,7 @@ def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -
             raise FileExistsError(f"A note already exists at {dest.relative_to(vault)}")
 
         # update frontmatter title then rename atomically
-        content = re.sub(r"^title:.*$", lambda m: f"title: {new_title}", content, count=1, flags=re.MULTILINE)
+        content = re.sub(r"^title:.*$", lambda m: f"title: {_yaml_quote(new_title)}", content, count=1, flags=re.MULTILINE)
         atomic_write(src, content)
         src.rename(dest)
 
@@ -195,11 +187,9 @@ def _wikilink_key_for(src: Path, content: str, backend=None) -> str:
     """The key other notes use to link to this note."""
     if backend:
         return backend.note_link_key(src, content)
+    # Legacy zk behavior: wikilink key is the frontmatter title
     match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-    key = match.group(1).strip() if match else src.stem
-    if len(key) >= 2 and key[0] == key[-1] and key[0] in ('"', "'"):
-        key = key[1:-1]
-    return key
+    return _yaml_unquote(match.group(1).strip()) if match else src.stem
 
 
 def preview_move(relative_path: str, destination_dir: str, vault: Path) -> str:

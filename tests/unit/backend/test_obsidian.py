@@ -288,3 +288,17 @@ class TestCachedResolveWikilink:
     def test_returns_none_for_unknown(self, cached_backend: ObsidianBackend) -> None:
         result = cached_backend.resolve_wikilink("nonexistent-note")
         assert result is None
+
+
+class TestRenderFrontmatterQuoting:
+    def test_special_values_round_trip_through_yaml(self, backend: ObsidianBackend) -> None:
+        meta = {"title": "foo: bar", "aliases": ["#x", "a: b"], "note": 'say "hi"'}
+        rendered = backend.render_frontmatter(meta)
+        assert backend.parse_frontmatter(rendered + "body\n") == meta
+
+    def test_non_string_values_keep_their_type(self, backend: ObsidianBackend) -> None:
+        import yaml
+
+        # parse_frontmatter stringifies scalars, so check what Obsidian's YAML reader sees
+        meta = {"title": "t", "priority": 3, "done": True, "ratio": 0.5, "nums": [1, 2]}
+        assert yaml.safe_load(backend.render_frontmatter(meta).strip("-\n")) == meta
