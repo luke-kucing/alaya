@@ -1,5 +1,7 @@
 import argparse
+import ipaddress
 import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -242,11 +244,50 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Overrides ALAYA_TOOL_PROFILE."
         ),
     )
+    parser.add_argument(
+        "--http",
+        metavar="HOST:PORT",
+        type=_http_address,
+        default=None,
+        help=(
+            "Serve MCP over Streamable HTTP on HOST:PORT (e.g. 127.0.0.1:7400) "
+            "instead of stdio, so many clients share one server. "
+            "Set ALAYA_HTTP_TOKEN to require a bearer token."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _http_address(value: str) -> tuple[str, int]:
+    host, _, port = value.rpartition(":")
+    host = host.strip("[]")
+    if not host or not port.isdigit() or not 0 < int(port) < 65536:
+        raise argparse.ArgumentTypeError(f"expected HOST:PORT, got {value!r}")
+    return host, int(port)
+
+
+def _configure_http_auth(host: str) -> None:
+    """Require ALAYA_HTTP_TOKEN as a bearer token when it is set."""
+    token = os.environ.get("ALAYA_HTTP_TOKEN", "").strip()
+    if token:
+        from fastmcp.server.auth import StaticTokenVerifier
+        mcp.auth = StaticTokenVerifier({token: {"client_id": "alaya-http", "scopes": []}})
+        return
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    if not loopback:
+        logger.warning(
+            "Serving on %s with no ALAYA_HTTP_TOKEN: anyone who can reach this "
+            "address can read and change the vault.", host,
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
+    if args.http:
+        _configure_http_auth(args.http[0])
 
     try:
         vault_root = get_vault_root()
@@ -311,7 +352,12 @@ def main(argv: list[str] | None = None) -> None:
     _maybe_start_reembed(vault_root, store)
 
     try:
-        mcp.run()
+        if args.http:
+            # One process for every client: one watcher, one index, one cache.
+            host, port = args.http
+            mcp.run(transport="http", host=host, port=port)
+        else:
+            mcp.run()
     finally:
         observer.stop()
         observer.join()
