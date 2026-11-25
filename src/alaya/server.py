@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware import Middleware
+from fastmcp.tools.tool import ToolResult
 
 from alaya.backend.config import get_vault_root, ConfigError
 
@@ -68,47 +70,63 @@ _TRUNCATION_HINTS = {
 }
 
 
-def _instrument_tools(vault: Path, backend=None) -> None:
-    """Wrap all registered MCP tools with audit logging and response shaping.
+class _ToolMiddleware(Middleware):
+    """Shape and audit every tool call.
 
     Shaping happens here rather than in each tool so that no tool can forget:
-    every response is capped to ALAYA_MAX_TOOL_OUTPUT_TOKENS and carries a
-    token_count comment. Tools that page their own output (get_note) cap
-    themselves first, so their resumable footer survives.
+    every text response is capped to ALAYA_MAX_TOOL_OUTPUT_TOKENS and carries
+    a token_count comment. Tools that page their own output (get_note) cap
+    themselves first, so their resumable footer survives. Calls that raise
+    (including argument validation) are audited with status "error".
     """
-    import asyncio
-    import time
-    from alaya.audit import log_tool_call
-    from alaya.confirm import audit_id_for
-    from alaya.responses import shape
 
+    def __init__(self, vault: Path, audit_path: Path | None) -> None:
+        self.vault = vault
+        self.audit_path = audit_path
+
+    async def on_call_tool(self, context, call_next):
+        import time
+        from alaya.audit import log_tool_call
+        from alaya.confirm import audit_id_for
+        from alaya.responses import shape
+        from mcp.types import TextContent
+
+        name = context.message.name
+        args = dict(context.message.arguments or {})
+        start = time.perf_counter()
+        try:
+            result = await call_next(context)
+        except Exception as e:
+            log_tool_call(
+                self.vault, name, args, f"ERROR [EXCEPTION]: {type(e).__name__}: {e}",
+                (time.perf_counter() - start) * 1000,
+                audit_path=self.audit_path, confirm_id=audit_id_for(args, ""),
+            )
+            raise
+        elapsed = (time.perf_counter() - start) * 1000
+
+        rendered = ""
+        if len(result.content) == 1 and isinstance(result.content[0], TextContent):
+            raw = result.content[0].text
+            rendered = shape(raw, unbounded=bool(args.get("unbounded")), hint=_TRUNCATION_HINTS.get(name))
+            structured = result.structured_content
+            if structured == {"result": raw}:
+                structured = {"result": rendered}
+            result = ToolResult(
+                content=[TextContent(type="text", text=rendered)],
+                structured_content=structured,
+                meta=result.meta,
+            )
+        log_tool_call(
+            self.vault, name, args, rendered[:200], elapsed,
+            audit_path=self.audit_path, confirm_id=audit_id_for(args, rendered),
+        )
+        return result
+
+
+def _instrument_tools(vault: Path, backend=None) -> None:
     audit_path = backend.config.audit_log_path if backend else None
-
-    tools = asyncio.get_event_loop().run_until_complete(mcp.list_tools())
-    for tool in tools:
-        original_fn = tool.fn
-        tool_name = tool.name
-
-        def _make_wrapper(_orig=original_fn, _name=tool_name):
-            def wrapper(*args, **kwargs):
-                start = time.perf_counter()
-                result = _orig(*args, **kwargs)
-                elapsed = (time.perf_counter() - start) * 1000
-                result = shape(
-                    result,
-                    unbounded=bool(kwargs.get("unbounded")),
-                    hint=_TRUNCATION_HINTS.get(_name),
-                )
-                rendered = str(result)
-                log_tool_call(
-                    vault, _name, kwargs, rendered[:200], elapsed,
-                    audit_path=audit_path,
-                    confirm_id=audit_id_for(kwargs, rendered),
-                )
-                return result
-            return wrapper
-
-        tool.fn = _make_wrapper()
+    mcp.add_middleware(_ToolMiddleware(vault, audit_path))
 
 
 def _register_index_listener(vault: Path, watcher_handler=None, cache=None) -> None:
