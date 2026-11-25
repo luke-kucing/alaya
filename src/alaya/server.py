@@ -47,7 +47,7 @@ def _register_all(vault: Path, backend=None, cache=None) -> None:
     # Tools that don't need backend
     write._register(mcp, vault)
     inbox._register(mcp, vault)
-    tasks._register(mcp, vault)
+    tasks._register(mcp, vault, backend=backend)
     ingest._register(mcp, vault)
     stats._register(mcp, vault, cache=cache)
     enrich._register(mcp, vault)

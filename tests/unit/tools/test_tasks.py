@@ -1,9 +1,22 @@
-"""Unit tests for task tools: get_todos, complete_todo."""
+"""Unit tests for task tools: checkbox todos and the task ledger."""
+import multiprocessing
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from alaya.tools.tasks import get_todos, complete_todo
+from alaya.tools.tasks import (
+    TaskConflict,
+    _read_task,
+    _write_task,
+    claim_task,
+    complete_todo,
+    create_task,
+    get_todos,
+    ready_tasks,
+    release_task,
+    renew_task,
+)
 
 
 class TestGetTodos:
@@ -112,3 +125,111 @@ class TestCompleteTodo:
                 task_text="anything",
                 vault=vault,
             )
+
+
+# --- Task ledger (#170) ---
+
+def _try_claim(vault: str, owner: str) -> bool:
+    """Run in a child process; module-level so spawn can pickle it."""
+    try:
+        claim_task("race", owner, Path(vault))
+        return True
+    except TaskConflict:
+        return False
+
+
+def _race(vault: Path, n: int = 8) -> list[bool]:
+    with multiprocessing.get_context("spawn").Pool(n) as pool:
+        return pool.starmap(_try_claim, [(str(vault), f"agent-{i}") for i in range(n)])
+
+
+class TestTaskLedger:
+    def test_create_writes_plain_markdown_task(self, vault: Path) -> None:
+        t = create_task("Fix the parser", vault, body="It breaks on tabs.", blocked_by=["[[other]]"])
+        text = (vault / t["path"]).read_text()
+        assert t["path"] == "tasks/fix-the-parser.md"
+        assert "type: task" in text and "status: open" in text
+        assert "- '[[other]]'" in text  # a quoted wikilink, not a nested YAML list
+        assert "# Fix the parser" in text and "It breaks on tabs." in text
+
+    def test_create_refuses_existing(self, vault: Path) -> None:
+        create_task("Same", vault)
+        with pytest.raises(FileExistsError):
+            create_task("Same", vault)
+
+    def test_rejects_path_like_task(self, vault: Path) -> None:
+        with pytest.raises(ValueError):
+            claim_task("../notes/secret", "a", vault)
+        with pytest.raises(ValueError):
+            claim_task("x", "bad\nowner", vault)
+
+    def test_live_lease_blocks_others_and_names_owner(self, vault: Path) -> None:
+        create_task("One", vault)
+        claim_task("one", "alice", vault)
+        with pytest.raises(TaskConflict, match="alice"):
+            claim_task("one", "bob", vault)
+
+    def test_expired_lease_is_claimable(self, vault: Path) -> None:
+        create_task("One", vault)
+        claim_task("one", "alice", vault)
+        _expire(vault / "tasks/one.md")
+        assert claim_task("[[one]]", "bob", vault)["owner"] == "bob"
+
+    def test_ready_excludes_unfinished_blockers(self, vault: Path) -> None:
+        create_task("Base", vault)
+        create_task("Next", vault, blocked_by=["base"])
+        create_task("Orphan", vault, blocked_by=["missing"])
+        assert [t["task"] for t in ready_tasks(vault)] == ["base"]
+        with pytest.raises(TaskConflict):
+            claim_task("next", "alice", vault)
+        claim_task("base", "alice", vault)
+        release_task("base", "alice", vault, status="done")
+        assert [t["task"] for t in ready_tasks(vault)] == ["next"]
+
+    def test_ready_includes_expired_claims(self, vault: Path) -> None:
+        create_task("One", vault)
+        claim_task("one", "alice", vault)
+        assert ready_tasks(vault) == []
+        _expire(vault / "tasks/one.md")
+        assert [t["task"] for t in ready_tasks(vault)] == ["one"]
+
+    def test_release_by_non_owner_rejected(self, vault: Path) -> None:
+        create_task("One", vault)
+        claim_task("one", "alice", vault)
+        with pytest.raises(TaskConflict):
+            release_task("one", "bob", vault)
+        with pytest.raises(TaskConflict):
+            renew_task("one", "bob", vault)
+
+    def test_release_logs_history(self, vault: Path) -> None:
+        create_task("One", vault)
+        claim_task("one", "alice", vault)
+        release_task("one", "alice", vault, status="blocked", note="needs\nthe API key")
+        with pytest.raises(TaskConflict):
+            claim_task("one", "bob", vault)
+        text = (vault / "tasks/one.md").read_text()
+        assert "## Log" in text and "alice → blocked: needs the API key" in text
+        meta, _ = _read_task(vault / "tasks/one.md")
+        assert meta["status"] == "blocked" and meta["owner"] == ""
+
+    def test_renew_extends_lease(self, vault: Path) -> None:
+        create_task("One", vault)
+        first = claim_task("one", "alice", vault, lease_minutes=1)
+        assert renew_task("one", "alice", vault, lease_minutes=120)["lease_until"] > first["lease_until"]
+
+    def test_processes_racing_one_claim_one_wins(self, vault: Path) -> None:
+        create_task("Race", vault)
+        assert sum(_race(vault)) == 1
+
+    def test_processes_racing_an_expired_lease_one_wins(self, vault: Path) -> None:
+        create_task("Race", vault)
+        claim_task("race", "old", vault)
+        _expire(vault / "tasks/race.md")
+        assert sum(_race(vault)) == 1
+        assert _read_task(vault / "tasks/race.md")[0]["owner"] != "old"
+
+
+def _expire(path: Path) -> None:
+    meta, body = _read_task(path)
+    meta["lease_until"] = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    _write_task(path, meta, body)

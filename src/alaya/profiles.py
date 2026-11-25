@@ -33,6 +33,11 @@ BUILTIN_PROFILES: dict[str, list[str] | str] = {
         "smart_capture",
         "append_to_note",
         "get_todos",
+        "create_task",
+        "ready_tasks",
+        "claim_task",
+        "renew_task",
+        "release_task",
     ],
     # Evaluators and reviewers: read the vault, never change it.
     "readonly": [
