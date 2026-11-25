@@ -71,6 +71,51 @@ make test-integration    # integration tests (requires zk binary)
 make lint                # ruff check
 ```
 
+### Recall eval (LongMemEval)
+
+An opt-in retrieval benchmark for `memory_recall` on
+[LongMemEval-S](https://github.com/xiaowu0162/LongMemEval). It never runs in
+`make test` and needs no API key. For each question, its ~50 haystack sessions
+become notes in a fresh vault, which is indexed; `memory_recall(question,
+budget_tokens=N)` is then scored on whether it returned the gold evidence
+sessions (`recall_any`: at least one, `recall_all`: every one). Abstention
+questions are skipped.
+
+```bash
+make eval-data                              # ~280 MB download, not committed
+make eval EVAL_ARGS="--per-type 10"         # ~30 min on a laptop CPU
+make eval                                   # all 470 questions, ~3 h
+```
+
+It sweeps `budget_tokens` (1000/2000/4000) and the `base`, `hyde` and `rerank`
+pipeline variants (`rerank` needs `uv sync --extra rerank`, else it is skipped).
+Results go to `tests/eval/results/<date>-<sha>.{json,md}`, with the full log
+beside them; only the summary is printed.
+
+**Baseline** (`main` @ `978ab7a`, 10 questions per type, seed 0, `nomic-v1.5`;
+the recall changes merged since only affect agent-memory notes, so they don't
+change these numbers):
+
+| variant | budget | recall_any | recall_all | sessions returned |
+|---|---|---|---|---|
+| base | 1000 | 0.850 | 0.717 | 1.8 |
+| base | 2000 | 0.867 | 0.767 | 2.2 |
+| base | 4000 | 0.867 | 0.767 | 2.5 |
+| hyde | 1000 | 0.867 | 0.750 | 2.5 |
+| hyde | 2000 | 0.900 | 0.833 | 4.3 |
+| hyde | 4000 | 0.917 | 0.900 | 6.7 |
+
+Per type, base at 2000 tokens (recall_any / recall_all): single-session-assistant
+1.00 / 1.00, knowledge-update 0.90 / 0.80, multi-session 0.90 / 0.60,
+single-session-preference 0.80 / 0.80, single-session-user 0.80 / 0.80,
+temporal-reasoning 0.80 / 0.60.
+
+What it shows so far: past 2000 tokens the base pipeline stops gaining, because
+it returns only ~2.5 sessions however large the budget, so the limit is how
+many results survive search, not the budget. HyDE returns more sessions and
+lifts `recall_all` by 0.1 on four of the six question types at 2000 tokens. Multi-session and temporal
+questions are the weak spots. Rerank has not been measured yet.
+
 ## Philosophy
 
 - **The AI is the interface.** Stay in one place — a Claude Code session — and converse. Claude reads, writes, searches, and reasons across the vault.

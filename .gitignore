@@ -16,6 +16,8 @@ build/
 .zk/vectors/
 
 # test artifacts
+tests/eval/longmemeval/data/
+tests/eval/results/*.log
 .pytest_cache/
 htmlcov/
 .coverage
