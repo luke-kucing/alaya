@@ -142,6 +142,9 @@ def rename_note(relative_path: str, new_title: str, vault: Path, backend=None) -
     # which may include dest itself, and must land after the index path moves
     new_relative = str(dest.relative_to(vault))
     emit(NoteEvent(EventType.MOVED, new_relative, old_path=relative_path))
+    # MOVED only rewrites the path in the index; re-embed so the new title
+    # (and the "From note: <title>" chunk prefix) replaces the old one
+    emit(NoteEvent(EventType.MODIFIED, new_relative))
 
     # update all [[old_key]] -> [[new_key]] across vault
     find_and_replace_wikilinks(old_key, new_key, vault)
