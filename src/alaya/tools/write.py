@@ -188,9 +188,10 @@ def append_to_note(
 
         # Insert under the named section, before the next ## heading or EOF
         lines = existing.splitlines(keepends=True)
-        target = f"## {section_header}"
+        # case-insensitive, matching replace_section/extract_section
+        target = f"## {section_header.strip()}".lower()
         section_idx = next(
-            (i for i, l in enumerate(lines) if l.rstrip() == target),
+            (i for i, l in enumerate(lines) if l.rstrip().lower() == target),
             None,
         )
         if section_idx is None:
