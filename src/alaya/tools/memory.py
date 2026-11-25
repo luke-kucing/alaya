@@ -206,6 +206,7 @@ def _weigh_memory(
     out = []
     for r in results:
         if r["path"] not in seen:
+            # nosemgrep: semgrep.alaya-path-traversal -- r["path"] comes from the vault index, not the caller
             seen[r["path"]] = _memory_weight(vault / r["path"], now, include_expired, include_superseded)
         w, superseded_by = seen[r["path"]]
         if w is None:

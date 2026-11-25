@@ -105,6 +105,7 @@ def _ensure_daily_note(vault: Path, daily_dir: str = "daily") -> str:
     """Return relative path to today's daily note, creating it if needed."""
     today = date.today().isoformat()
     rel_path = f"{daily_dir}/{today}.md"
+    # nosemgrep: semgrep.alaya-path-traversal -- daily_dir is config, filename is today's date
     full_path = vault / rel_path
 
     if full_path.exists():

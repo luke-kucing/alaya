@@ -104,6 +104,7 @@ class TaskConflict(Exception):
 
 
 def _tasks_root(vault: Path, backend=None) -> Path:
+    # nosemgrep: semgrep.alaya-path-traversal -- tasks_dir is vault config, not tool input
     return vault / (getattr(getattr(backend, "config", None), "tasks_dir", None) or "tasks")
 
 
@@ -215,6 +216,7 @@ def create_task(
 
     name = _task_name(_slugify(title))
     blockers = [f"[[{_task_name(b)}]]" for b in blocked_by or []]
+    # nosemgrep: semgrep.alaya-path-traversal -- name passed _task_name() validation (single safe segment)
     path = _tasks_root(vault, backend) / f"{name}.md"
     meta = {
         "title": title.strip(), "type": TASK_TYPE, "status": "open", "owner": "",
