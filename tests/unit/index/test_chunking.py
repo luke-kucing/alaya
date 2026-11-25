@@ -8,11 +8,30 @@ from alaya.index.chunking import (
     SemanticChunker,
     DailyNoteChunker,
     select_strategy,
+    _approx_tokens,
 )
 from alaya.index.embedder import Chunk
 
 
 FRONTMATTER = "---\ntitle: Test Note\ndate: 2026-01-01\n---\n"
+
+
+class TestOversizedParagraphs:
+    """#190: one unbroken paragraph must not become a single huge chunk."""
+
+    CFG = ChunkConfig(max_tokens=512)
+
+    @pytest.mark.parametrize("body", [
+        " ".join(f"word{i}" for i in range(20000)),          # long prose line
+        "\n".join(f"log line {i} ok" for i in range(5000)),  # long block, no blank lines
+        "x" * 50000,                                          # no whitespace at all
+    ])
+    @pytest.mark.parametrize("chunker", [SemanticChunker(), SectionChunker()])
+    def test_chunks_stay_bounded(self, chunker, body):
+        chunks = chunker.chunk("notes/big.md", FRONTMATTER + body, self.CFG)
+        assert len(chunks) > 1
+        assert max(_approx_tokens(c.text) for c in chunks) <= 512 + 20  # + section heading slack
+        assert "".join(c.text for c in chunks).count("x") >= body.count("x")  # nothing dropped
 
 
 class TestSectionChunker:

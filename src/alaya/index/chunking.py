@@ -1,6 +1,7 @@
 """Pluggable chunking strategies for note indexing."""
 from __future__ import annotations
 
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -17,8 +18,44 @@ class ChunkConfig:
 
 
 def _approx_tokens(text: str) -> int:
-    """Approximate token count using word count (1 word ≈ 1.3 tokens)."""
-    return int(len(text.split()) * 1.3)
+    """Approximate token count: 1 word ≈ 1.3 tokens, floored at ~6 chars per token.
+
+    The char floor only bites on whitespace-poor text (base64, minified code), which
+    the word count alone would call one token.
+    """
+    return int(max(len(text.split()) * 1.3, len(text) / 6))
+
+
+# Embedder-safe ceiling. Below it a paragraph (or code block) stays whole even past
+# max_tokens; above it, it is split (#190: a 76k-char paragraph became one chunk and
+# fastembed used tens of GB of attention memory embedding it).
+_HARD_CAP_TOKENS = 2048
+
+
+def _bound_paragraphs(paragraphs: list[str], max_tokens: int) -> list[str]:
+    """Split any paragraph over the hard cap into max_tokens pieces: by line, then by width."""
+    cap = max(_HARD_CAP_TOKENS, max_tokens)
+    width = max_tokens * 4  # chars; within max_tokens by either estimate
+    out: list[str] = []
+    for para in paragraphs:
+        if _approx_tokens(para) <= cap:
+            out.append(para)
+            continue
+        lines: list[str] = []
+        for line in para.splitlines():
+            if _approx_tokens(line) <= max_tokens:
+                lines.append(line)
+            else:
+                lines += textwrap.wrap(line, width=width, break_long_words=True, break_on_hyphens=False)
+        part: list[str] = []
+        for line in lines:
+            if part and _approx_tokens("\n".join([*part, line])) > max_tokens:
+                out.append("\n".join(part))
+                part = []
+            part.append(line)
+        if part:
+            out.append("\n".join(part))
+    return out
 
 
 def _make_chunk(
@@ -126,7 +163,7 @@ class SemanticChunker:
     def chunk(self, path: str, content: str, config: ChunkConfig) -> list[Chunk]:
         note = parse_note(content)
         title = note.title or Path(path).stem
-        paragraphs = _extract_paragraphs(note.body)
+        paragraphs = _bound_paragraphs(_extract_paragraphs(note.body), config.max_tokens)
 
         if not paragraphs:
             return [_make_chunk(path, content.strip(), 0, title, note.tags, note.date, note.extra.get("type", ""))]
@@ -212,7 +249,7 @@ def select_strategy(path: str, content: str, daily_dir: str = "daily") -> Chunki
 
 def _split_on_paragraphs(text: str, config: ChunkConfig) -> list[str]:
     """Sub-split a text block on blank lines to stay under max_tokens."""
-    paragraphs = _extract_paragraphs(text)
+    paragraphs = _bound_paragraphs(_extract_paragraphs(text), config.max_tokens)
     result: list[str] = []
     current_parts: list[str] = []
     current_tokens = 0
