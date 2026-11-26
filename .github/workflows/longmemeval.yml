@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: longmemeval
+  group: longmemeval-${{ inputs.embedding_model }}  # one run per embedder at a time; embedders run side by side
   cancel-in-progress: false
 
 # Actions are pinned to commit SHAs (tags can be moved); Dependabot keeps them current.

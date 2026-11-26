@@ -49,6 +49,40 @@ MODELS: dict[str, EmbeddingModelConfig] = {
         document_prefix="",
         supports_late_chunking=True,
     ),
+    # Prefixes per each model card. Compared on LongMemEval in docs/benchmarks/longmemeval.md.
+    "qwen3-0.6b": EmbeddingModelConfig(
+        key="qwen3-0.6b",
+        name="Qwen/Qwen3-Embedding-0.6B",
+        file_name=None,
+        dimensions=1024,
+        search_prefix="Instruct: Given a question, retrieve passages that answer the question\nQuery:",
+        document_prefix="",
+    ),
+    "embeddinggemma-300m": EmbeddingModelConfig(
+        key="embeddinggemma-300m",
+        name="google/embeddinggemma-300m",
+        file_name=None,
+        dimensions=768,
+        search_prefix="task: search result | query: ",
+        document_prefix="title: none | text: ",
+    ),
+    "granite-small-r2": EmbeddingModelConfig(
+        key="granite-small-r2",
+        name="ibm-granite/granite-embedding-small-english-r2",
+        file_name=None,
+        dimensions=384,
+        search_prefix="",
+        document_prefix="",
+    ),
+    # Static (model2vec) embeddings: no transformer at query or index time.
+    "potion-retrieval-32m": EmbeddingModelConfig(
+        key="potion-retrieval-32m",
+        name="minishlab/potion-retrieval-32M",
+        file_name=None,
+        dimensions=512,
+        search_prefix="",
+        document_prefix="",
+    ),
 }
 
 DEFAULT_MODEL_KEY = "nomic-v1.5"
