@@ -13,6 +13,8 @@ the major version is 0, a minor bump may break compatibility.
   before the limit or token budget applied. LongMemEval recall_all at 4000 tokens: 0.681 → 0.874. (#190)
 - `rerank=True` maps cross-encoder logits to 0..1. Raw, mostly negative logits were being filtered
   out, which left about 45% of queries with no results. (#190)
+- Indexing embeds 16 chunks per batch instead of fastembed's default 256. A note with ~200
+  chunks (a large ingested document) peaked at 36 GB; it now peaks at about 4 GB. (#212)
 
 ## 0.3.0 — 2026-11-25
 
