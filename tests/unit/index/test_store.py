@@ -91,6 +91,18 @@ class TestHybridSearch:
         results = hybrid_search("kubernetes", query_embedding, store, limit=5)
         assert isinstance(results, list)
 
+    def test_keyword_side_of_hybrid_runs(self, tmp_path: Path) -> None:
+        """Native hybrid search must not silently fall back to vector-only: with identical
+        vectors, only the BM25 side can put the keyword match first."""
+        store = VaultStore(tmp_path / "lance")
+        vec = np.ones(768, dtype=np.float32)
+        for path, text in [("a/other.md", "notes about gardening and soil"),
+                           ("a/target.md", "brewing notes on zymurgy and yeast")]:
+            upsert_note(path, _make_chunks(path, text), [vec], store)
+        with patch("alaya.index.store._vector_search", side_effect=AssertionError("fell back")):
+            results = hybrid_search("zymurgy", vec, store, limit=2)
+        assert results[0]["path"] == "a/target.md"
+
     def test_empty_index_returns_empty(self, tmp_path: Path) -> None:
         store = VaultStore(tmp_path / "lance")
         query_embedding = np.random.rand(768).astype(np.float32)
