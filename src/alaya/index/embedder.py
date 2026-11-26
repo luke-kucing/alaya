@@ -111,6 +111,9 @@ def embed_query(text: str) -> np.ndarray:
     return np.frombuffer(raw_bytes, dtype=np.float32).copy()
 
 
+_EMBED_BATCH = 16
+
+
 def embed_chunks(chunks: list[Chunk], full_text: str | None = None) -> list[np.ndarray]:
     """Embed a list of chunks. Returns one normalized float32 ndarray per chunk.
 
@@ -129,7 +132,9 @@ def embed_chunks(chunks: list[Chunk], full_text: str | None = None) -> list[np.n
     # Standard chunk-then-embed approach
     model, cfg = get_model()
     texts = [f"{cfg.document_prefix}{c.text}" for c in chunks]
-    raw = np.array(list(model.embed(texts)))
+    # fastembed's default batch of 256 pads every text to the batch's longest: 200 chunks
+    # of one big note peaked at 36 GB. 16 peaks at ~4 GB, and per-note speed is unchanged (#212).
+    raw = np.array(list(model.embed(texts, batch_size=_EMBED_BATCH)))
     norms = np.linalg.norm(raw, axis=1, keepdims=True)
     normalized = (raw / np.where(norms == 0, 1, norms)).astype(np.float32)
     return [normalized[i] for i in range(len(chunks))]

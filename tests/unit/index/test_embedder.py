@@ -148,3 +148,14 @@ class TestGetModelThreadSafety:
             reset_model()
             get_model()
             assert mock_cls.call_count == 2
+
+
+def test_embed_chunks_uses_small_batches(vault: Path) -> None:
+    # #212: the fastembed default (256) padded a big note's chunks together and peaked at 36 GB.
+    from alaya.index.models import DEFAULT_MODEL_KEY, MODELS
+    chunks = chunk_note("projects/second-brain.md", (vault / "projects/second-brain.md").read_text())
+    model = MagicMock()
+    model.embed.return_value = iter(np.random.rand(len(chunks), 768))
+    with patch("alaya.index.embedder.get_model", return_value=(model, MODELS[DEFAULT_MODEL_KEY])):
+        embed_chunks(chunks)
+    assert model.embed.call_args.kwargs["batch_size"] == 16
