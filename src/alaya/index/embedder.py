@@ -31,11 +31,15 @@ def get_model():
         # Re-check after acquiring the lock (double-checked locking pattern).
         if _model is None or _loaded_model_key != cfg.key:
             logger.info("Loading embedding model: %s (%s)", cfg.key, cfg.name)
-            from fastembed import TextEmbedding
-            kwargs = {}
-            if cfg.file_name:
-                kwargs["model_file"] = cfg.file_name
-            _model = TextEmbedding(cfg.name, **kwargs)
+            if cfg.backend == "openai":
+                from alaya.index.remote_embedder import RemoteEmbedding
+                _model = RemoteEmbedding(cfg.url, cfg.name)
+            else:
+                from fastembed import TextEmbedding
+                kwargs = {}
+                if cfg.file_name:
+                    kwargs["model_file"] = cfg.file_name
+                _model = TextEmbedding(cfg.name, **kwargs)
             _loaded_model_key = cfg.key
             logger.info("Embedding model loaded")
     return _model, cfg

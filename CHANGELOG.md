@@ -12,6 +12,9 @@ the major version is 0, a minor bump may break compatibility.
 - `vault_health` reports index lag (notes edited since the last index write, and how long ago),
   whether a background reindex or re-embed is running (with progress), the active embedder (model and
   dims, flagged when the index was built with a different one) and the store. (#162)
+- `ALAYA_EMBEDDING_URL` embeds through an OpenAI-compatible endpoint (oMLX, vLLM, Ollama, OpenAI)
+  instead of local ONNX. It falls back to ONNX with a warning if the endpoint is down at startup, and
+  switching to or from it triggers the background re-embed. (#159)
 
 ## 0.3.1 — 2026-11-26
 
