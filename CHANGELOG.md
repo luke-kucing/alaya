@@ -9,6 +9,9 @@ the major version is 0, a minor bump may break compatibility.
 
 - `append_todo(path, task, section="Tasks")` adds a `- [ ]` task to the end of a note's section list,
   creating the section if missing and stripping accidental checkbox prefixes. (#148)
+- `vault_health` reports index lag (notes edited since the last index write, and how long ago),
+  whether a background reindex or re-embed is running (with progress), the active embedder (model and
+  dims, flagged when the index was built with a different one) and the store. (#162)
 
 ## 0.3.1 — 2026-11-26
 

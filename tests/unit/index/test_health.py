@@ -81,3 +81,62 @@ def test_concurrent_access_no_data_race():
         t.join()
 
     assert not errors, f"Concurrent health access raised: {errors}"
+
+
+class TestReport:
+    """#162: vault_health shows lag, in-flight reindex, embedder and store."""
+
+    @pytest.fixture
+    def setup(self, tmp_path):
+        import os
+        import time
+        from alaya.index.store import get_store, reset_store
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        for name in ("a", "b", "c"):
+            (vault / f"{name}.md").write_text("# n\n")
+            os.utime(vault / f"{name}.md", (time.time() - 600,) * 2)  # edited before the index
+        store = get_store(vault)
+        store._get_table()  # first index write
+        yield vault, store
+        reset_store()
+
+    def test_no_lag_when_nothing_edited_since_index_write(self, setup):
+        vault, store = setup
+        out = health.report(vault, store)
+        assert "Index lag: 0s (no notes edited since the last index write)" in out
+        assert "Reindex in progress: no" in out
+        assert "Embedder: fastembed " in out and " dims)" in out
+        assert "Store: LanceDB" in out
+
+    def test_counts_notes_edited_after_index_write(self, setup):
+        import os
+        vault, store = setup
+        later = store.last_write_time() + 30
+        os.utime(vault / "b.md", (later, later))
+        n, lag = health.index_lag(vault, store.last_write_time())
+        assert n == 1 and lag is not None
+        assert "(1 notes edited since the last index write)" in health.report(vault, store)
+
+    def test_shows_in_flight_reindex_and_migration(self, setup):
+        import threading
+        vault, store = setup
+        release = threading.Event()
+        t = threading.Thread(target=release.wait, name="alaya-schema-reindex", daemon=True)
+        t.start()
+        health.start_migration("old-model", "new-model", total=10)
+        health.update_migration_progress(4)
+        try:
+            out = health.report(vault, store)
+        finally:
+            release.set()
+            t.join()
+        assert "Reindex in progress: yes (alaya-schema-reindex)" in out
+        assert "Re-embed: 4/10 notes (old-model -> new-model)" in out
+        assert "Reindex in progress: no" in health.report(vault, store)
+
+    def test_unknown_lag_before_index_exists(self, tmp_path):
+        from alaya.index.store import get_store, reset_store
+        store = get_store(tmp_path)
+        assert store.last_write_time() is None
+        reset_store()

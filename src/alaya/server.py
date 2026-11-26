@@ -201,26 +201,11 @@ def _register_health_tool(vault: Path) -> None:
 
     @mcp.tool()
     def vault_health() -> str:
-        """Check index sync status. Call this if search results seem stale or incomplete."""
-        status = health.get_status()
-        chunks = store.count()
-        lines = [f"Indexed chunks: {chunks}"]
+        """Check index health: lag behind vault edits, reindex in progress, embedder, failed paths.
 
-        last_ago = status["last_success_ago_seconds"]
-        if last_ago is None:
-            lines.append("Last successful index: never (no events processed yet)")
-        else:
-            lines.append(f"Last successful index: {last_ago}s ago")
-
-        failed = status["failed_paths"]
-        if failed:
-            lines.append(f"\nFailed paths ({len(failed)}):")
-            for path, msg in failed.items():
-                lines.append(f"  {path}: {msg}")
-        else:
-            lines.append("No failed paths.")
-
-        return "\n".join(lines)
+        Call this if search results seem stale or incomplete.
+        """
+        return health.report(vault, store)
 
 
 def _maybe_start_reembed(vault_root, store) -> None:

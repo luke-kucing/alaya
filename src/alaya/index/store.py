@@ -141,6 +141,16 @@ class VaultStore:
             self._needs_reindex = False
         return val
 
+    def last_write_time(self) -> float | None:
+        """Wall-clock time of the index's last write, or None before the table exists.
+
+        LanceDB adds a manifest under ``_versions`` on every write, so the directory mtime moves.
+        """
+        try:
+            return (Path(self.db_path) / f"{_TABLE_NAME}.lance" / "_versions").stat().st_mtime
+        except OSError:
+            return None
+
     def count(self) -> int:
         try:
             return self._get_table().count_rows()
