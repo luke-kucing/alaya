@@ -475,6 +475,7 @@ propose and execute entries share a `confirm_id` in the audit log.
 | `delete_note` | Soft-delete to archives/ |
 | `find_references` | Find wikilinks and text mentions of a title |
 | `get_todos` | Find all `- [ ]` tasks across the vault |
+| `append_todo` | Add a `- [ ]` task under a note's `## Tasks` (or named) section, creating it if missing |
 | `complete_todo` | Mark a task complete (fuzzy line fallback) |
 | `create_task` | Add a task note to the ledger (`tasks/`), optionally blocked by other tasks |
 | `ready_tasks` | List open, unclaimed (or lease-expired) tasks whose blockers are done |
@@ -675,7 +676,7 @@ src/alaya/
 │   ├── search.py       # adaptive search with corrective RAG pipeline
 │   ├── structure.py    # move, rename, delete, find_references
 │   ├── edit.py         # replace_section, extract_section
-│   ├── tasks.py        # get_todos, complete_todo
+│   ├── tasks.py        # get_todos, append_todo, complete_todo
 │   ├── external.py     # pull_external, push_external
 │   ├── ingest.py       # URL/PDF/markdown ingestion
 │   ├── stats.py        # vault_stats

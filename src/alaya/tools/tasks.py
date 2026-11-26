@@ -1,4 +1,4 @@
-"""Task tools: checkbox todos (get_todos, complete_todo) and the task ledger.
+"""Task tools: checkbox todos (get_todos, append_todo, complete_todo) and the task ledger.
 
 The ledger (#170) lets several agents split work in one vault: one note per
 task under ``tasks/``, with status, owner and lease in frontmatter. Agents
@@ -90,6 +90,49 @@ def complete_todo(
         atomic_write(note_path, "".join(lines))
 
     emit(NoteEvent(EventType.MODIFIED, str(note_path.relative_to(vault.resolve()))))
+
+
+_CHECKBOX_PREFIX = re.compile(r"^\s*(?:[-*+]\s+)?(?:\[[ xX]?\]\s*)?")
+
+
+def clean_todo(task: str) -> str | None:
+    """Task text without an accidental list/checkbox prefix, or None if empty or multi-line."""
+    task = _CHECKBOX_PREFIX.sub("", task, count=1).strip()
+    return task if task and "\n" not in task else None
+
+
+def append_todo(path: str, task: str, vault: Path, section: str = "Tasks") -> str:
+    """Append '- [ ] task' to the end of the '## section' list, creating the section if missing.
+
+    Returns the line written. Raises ValueError for a bad task/section or a path outside the vault.
+    """
+    text = clean_todo(task)
+    section = section.strip()
+    if text is None or not section or "\n" in section:
+        raise ValueError("task and section must be non-empty single lines")
+    note_path = resolve_note_path(path, vault)
+    item = f"- [ ] {text}"
+
+    with get_path_lock(note_path):
+        if not note_path.exists():
+            raise FileNotFoundError(f"Note not found: {path}")
+        lines = note_path.read_text().splitlines(keepends=True)
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        target = f"## {section}".lower()  # case-insensitive, like append_to_note
+        start = next((i for i, line in enumerate(lines) if line.rstrip().lower() == target), None)
+        if start is None:
+            lines += (["\n"] if lines and lines[-1].strip() else []) + [f"## {section}\n", "\n", item + "\n"]
+        else:
+            end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+            # after the section's last non-blank line, so the item joins the existing list
+            while end > start + 1 and not lines[end - 1].strip():
+                end -= 1
+            lines.insert(end, item + "\n")
+        atomic_write(note_path, "".join(lines))
+
+    emit(NoteEvent(EventType.MODIFIED, str(note_path.relative_to(vault.resolve()))))
+    return item
 
 
 # --- Task ledger (#170) ---
@@ -398,6 +441,21 @@ def _register(mcp: FastMCP, vault: Path, backend=None) -> None:
             return "No open tasks found."
         lines = [f"- `{t['path']}:{t['line']}` — {t['text']}" for t in todos]
         return "\n".join(lines)
+
+    @mcp.tool(name="append_todo")
+    def append_todo_tool(path: str, task: str, section: str = "Tasks") -> str:
+        """Add an open task ('- [ ] task') to a note's '## section' list, creating the section if missing.
+
+        Prefer this over append_to_note for todos: it formats the checkbox and keeps the list together.
+        """
+        if clean_todo(task) is None or not section.strip() or "\n" in section:
+            return error(INVALID_ARGUMENT, "task and section must be non-empty single lines")
+        try:
+            return f"Added to {path} under '## {section.strip()}': {append_todo(path, task, vault, section)}"
+        except FileNotFoundError as e:
+            return error(NOT_FOUND, str(e))
+        except ValueError as e:
+            return error(OUTSIDE_VAULT, str(e))
 
     @mcp.tool(name="complete_todo")
     def complete_todo_tool(path: str, line: int, task_text: str) -> str:

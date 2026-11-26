@@ -8,6 +8,8 @@ import pytest
 from alaya.tools.tasks import (
     TaskConflict,
     _read_task,
+    append_todo,
+    clean_todo,
     _write_task,
     claim_task,
     complete_todo,
@@ -233,3 +235,52 @@ def _expire(path: Path) -> None:
     meta, body = _read_task(path)
     meta["lease_until"] = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
     _write_task(path, meta, body)
+
+
+class TestAppendTodo:
+    """#148: safe '- [ ]' appends under a section."""
+
+    def _note(self, vault: Path, body: str) -> str:
+        (vault / "projects" / "todo-test.md").write_text(body)
+        return "projects/todo-test.md"
+
+    def test_appends_to_end_of_existing_list(self, vault: Path) -> None:
+        rel = self._note(vault, "# P\n\n## Tasks\n\n- [ ] one\n- [x] two\n\n## Notes\n\nkeep me\n")
+        assert append_todo(rel, "three", vault) == "- [ ] three"
+        assert (vault / rel).read_text() == (
+            "# P\n\n## Tasks\n\n- [ ] one\n- [x] two\n- [ ] three\n\n## Notes\n\nkeep me\n"
+        )
+
+    def test_creates_missing_section_at_end(self, vault: Path) -> None:
+        rel = self._note(vault, "# P\n\nbody")
+        append_todo(rel, "first", vault, section="Next")
+        assert (vault / rel).read_text() == "# P\n\nbody\n\n## Next\n\n- [ ] first\n"
+
+    def test_section_match_is_case_insensitive(self, vault: Path) -> None:
+        rel = self._note(vault, "## tasks\n- [ ] a\n")
+        append_todo(rel, "b", vault)
+        assert (vault / rel).read_text() == "## tasks\n- [ ] a\n- [ ] b\n"
+
+    @pytest.mark.parametrize("raw", ["- [ ] x", "[ ] x", "- [x] x", "* x", "  x  "])
+    def test_strips_accidental_prefixes(self, raw: str) -> None:
+        assert clean_todo(raw) == "x"
+
+    @pytest.mark.parametrize("bad", ["", "   ", "- [ ] ", "a\nb"])
+    def test_rejects_empty_or_multiline(self, vault: Path, bad: str) -> None:
+        rel = self._note(vault, "x\n")
+        with pytest.raises(ValueError):
+            append_todo(rel, bad, vault)
+        assert (vault / rel).read_text() == "x\n"
+
+    def test_rejects_path_outside_vault(self, vault: Path) -> None:
+        with pytest.raises(ValueError):
+            append_todo("../escape.md", "x", vault)
+
+    def test_missing_note(self, vault: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            append_todo("projects/nope.md", "x", vault)
+
+    def test_new_task_is_listed_by_get_todos(self, vault: Path) -> None:
+        rel = self._note(vault, "## Tasks\n")
+        append_todo(rel, "findable", vault)
+        assert any(t["path"] == rel and t["text"] == "findable" for t in get_todos(vault, directories=["projects"]))
