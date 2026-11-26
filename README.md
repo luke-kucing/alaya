@@ -290,7 +290,7 @@ updating. Profiles accept either spelling.
 | `get_tags` | All tags with counts |
 | `vault_stats` | Vault overview: note counts, directories, top tags |
 | `vault_graph` | Wikilink graph: orphans, hubs, topology |
-| `vault_health` | Index health, embedding model status, migration progress |
+| `vault_health` | Index lag behind vault edits, reindex in progress, re-embed progress, embedder and store, failed paths |
 
 ### Write & capture
 
