@@ -24,6 +24,7 @@ import json
 import logging
 import random
 import re
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -40,8 +41,13 @@ RESULTS = HERE.parent / "results"
 logger = logging.getLogger("longmemeval")
 # Pipeline stages memory_recall can toggle; each is keyless (template HyDE,
 # local cross-encoder). memory_recall has no graph expansion to toggle.
-# "threshold" overrides corrective.filter_relevant's cutoff (#190: the 0.2 default drops gold hits).
-VARIANTS = {"base": {}, "hyde": {"hyde": True}, "rerank": {"rerank": True}, "base-t0": {"threshold": 0.0}}
+# "threshold" overrides corrective.filter_relevant's cutoff (#190).
+# "baseline" swaps alaya's pipeline for a standard retriever over the same index, same
+# candidate count (20 notes) and same budget packing: plain BM25, or plain cosine on the
+# same embedder. They are the "standard RAG" reference points.
+VARIANTS = {"base": {}, "hyde": {"hyde": True}, "rerank": {"rerank": True},
+            "bm25": {"baseline": "bm25"}, "dense": {"baseline": "dense"}}
+_BASELINE_NOTES = 20  # get_memory_context's candidate limit (max(20, k))
 
 _RECALLED_RE = re.compile(r"`sessions/([^`]+)\.md`")
 
@@ -82,8 +88,13 @@ def sample(entries: list[dict], per_type: int | None, seed: int) -> list[dict]:
     return out
 
 
-def summarize(rows: list[dict]) -> dict:
-    """Mean recall per (variant, budget), overall and per question type."""
+def ranked_recall(ranked: list[str], gold: list[str], k: int) -> dict:
+    """Session-level recall of the top-k ranked sessions, budget-independent."""
+    return score(ranked[:k], gold)
+
+
+def summarize(rows: list[dict], retrieval: list[dict] | None = None, questions: list[dict] | None = None) -> dict:
+    """Mean recall per (variant, budget), overall and per question type, plus cost and ranked recall."""
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for r in rows:
         groups[(r["variant"], r["budget"], "all")].append(r)
@@ -96,8 +107,28 @@ def summarize(rows: list[dict]) -> dict:
             "recall_any": round(sum(r["recall_any"] for r in rs) / n, 3),
             "recall_all": round(sum(r["recall_all"] for r in rs) / n, 3),
             "avg_returned": round(sum(r["returned"] for r in rs) / n, 1),
+            "avg_context_tokens": round(sum(r.get("context_tokens", 0) for r in rs) / n),
         })
-    return {"rows": out}
+    ranked_rows = []
+    by_variant: dict[str, list[dict]] = defaultdict(list)
+    for r in retrieval or []:
+        by_variant[r["variant"]].append(r)
+    for variant, rs in sorted(by_variant.items()):
+        n = len(rs)
+        row = {"variant": variant, "n": n,
+               "median_query_ms": round(statistics.median(r["query_ms"] for r in rs), 1),
+               "p95_query_ms": round(sorted(r["query_ms"] for r in rs)[int(0.95 * (n - 1))], 1)}
+        for k in (5, 10):
+            for key in ("recall_any", "recall_all"):
+                row[f"{key}@{k}"] = round(sum(ranked_recall(r["ranked"], r["gold"], k)[key] for r in rs) / n, 3)
+        ranked_rows.append(row)
+    cost = {}
+    if questions:
+        nq = len(questions)
+        cost = {"mean_haystack_tokens": round(sum(q["haystack_tokens"] for q in questions) / nq),
+                "mean_index_seconds": round(sum(q["index_seconds"] for q in questions) / nq, 1),
+                "mean_chunks": round(sum(q["chunks"] for q in questions) / nq)}
+    return {"rows": out, "ranked": ranked_rows, "cost": cost}
 
 
 def markdown(summary: dict, meta: dict) -> str:
@@ -107,41 +138,83 @@ def markdown(summary: dict, meta: dict) -> str:
         (f"{meta['questions']} questions ({meta['per_type'] or 'all'} per type, seed {meta['seed']}), "
          f"embedder `{meta['embedder']}`, {meta['minutes']} min."),
         "",
-        "| variant | budget | question type | n | recall_any | recall_all | sessions returned |",
-        "|---|---|---|---|---|---|---|",
+    ]
+    cost = summary.get("cost") or {}
+    if cost:
+        lines += [(f"Per question: {cost['mean_haystack_tokens']} haystack tokens, {cost['mean_chunks']} chunks, "
+                   f"indexed in {cost['mean_index_seconds']} s."), ""]
+    if summary.get("ranked"):
+        lines += ["| variant | recall_any@5 | recall_all@5 | recall_any@10 | recall_all@10 | median query ms | p95 query ms |",
+                  "|---|---|---|---|---|---|---|"]
+        for r in summary["ranked"]:
+            lines.append(f"| {r['variant']} | {r['recall_any@5']:.3f} | {r['recall_all@5']:.3f} | "
+                         f"{r['recall_any@10']:.3f} | {r['recall_all@10']:.3f} | {r['median_query_ms']} | {r['p95_query_ms']} |")
+        lines.append("")
+    lines += [
+        "| variant | budget | question type | n | recall_any | recall_all | sessions returned | context tokens |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for r in summary["rows"]:
         lines.append(
             f"| {r['variant']} | {r['budget']} | {r['question_type']} | {r['n']} | "
-            f"{r['recall_any']:.3f} | {r['recall_all']:.3f} | {r['avg_returned']} |"
+            f"{r['recall_any']:.3f} | {r['recall_all']:.3f} | {r['avg_returned']} | {r.get('avg_context_tokens', '')} |"
         )
     return "\n".join(lines) + "\n"
 
 
-def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> list[dict]:
+def baseline_context(kind: str, query: str, vault: Path, **_ignored) -> list[dict]:
+    """Ranked hits from a standard retriever, one chunk per note, in get_memory_context's shape."""
+    from alaya.index.embedder import embed_query
+    from alaya.index.store import _vector_search, get_store, keyword_search
+    store = get_store(vault)
+    if kind == "bm25":
+        return keyword_search(query, store, limit=_BASELINE_NOTES)
+    return _vector_search(embed_query(query), store, None, _BASELINE_NOTES * 4, _BASELINE_NOTES)
+
+
+def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> tuple[list[dict], list[dict], dict]:
+    """Rows per (variant, budget), ranked retrieval per variant, and per-question cost."""
     from alaya.index import corrective as corrective_mod
     from alaya.index.reindex import reindex_all
     from alaya.index.store import get_store, reset_store
+    from alaya.tokens import count_tokens
     from alaya.tools import memory, search
     from alaya.tools.memory import memory_recall
 
     gold = [note_name(s) for s in entry["answer_session_ids"]]
-    rows = []
+    rows, retrieval = [], []
     with tempfile.TemporaryDirectory(prefix="alaya-lme-") as tmp:
         vault = Path(tmp)
         (vault / "sessions").mkdir()
+        haystack_tokens = 0
         for sid, when, turns in zip(entry["haystack_session_ids"], entry["haystack_dates"],
                                     entry["haystack_sessions"]):
-            (vault / "sessions" / f"{note_name(sid)}.md").write_text(session_note(sid, when, turns))
-        reindex_all(vault, get_store(vault))
+            text = session_note(sid, when, turns)
+            haystack_tokens += count_tokens(text)
+            (vault / "sessions" / f"{note_name(sid)}.md").write_text(text)
+        t0 = time.monotonic()
+        indexed = reindex_all(vault, get_store(vault))
+        cost = {"question_id": entry["question_id"], "haystack_tokens": haystack_tokens,
+                "index_seconds": round(time.monotonic() - t0, 2), "chunks": indexed.chunks_created}
         corrective = search._run_corrective_search
         relevant = corrective_mod.filter_relevant
         for variant, opts in variants.items():
             opts = dict(opts)
             threshold = opts.pop("threshold", None)
+            baseline = opts.pop("baseline", None)
             filt = relevant if threshold is None else partial(relevant, threshold=threshold)
+            fetch = memory.get_memory_context if baseline is None else partial(baseline_context, baseline)
             # Budgets only change how the same hits are trimmed: search once per variant.
-            fetch_once = lru_cache(maxsize=None)(memory.get_memory_context)
+            cached = lru_cache(maxsize=None)(fetch)
+            seen: dict = {}
+
+            def fetch_once(*a, cached=cached, seen=seen, **kw):
+                t = time.perf_counter()
+                hits = cached(*a, **kw)
+                seen.setdefault("ms", (time.perf_counter() - t) * 1000)  # first call is the real search
+                seen["hits"] = hits
+                return hits
+
             with patch.object(search, "_run_corrective_search", partial(corrective, **opts)), \
                  patch.object(corrective_mod, "filter_relevant", filt), \
                  patch.object(memory, "get_memory_context", fetch_once):
@@ -152,9 +225,14 @@ def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> 
                         "question_type": entry["question_type"],
                         "variant": variant, "budget": budget,
                         **score(recalled_sessions(out), gold),
+                        "context_tokens": count_tokens(out),
                     })
+            ranked = list(dict.fromkeys(Path(h["path"]).stem for h in seen.get("hits") or []))[:20]
+            retrieval.append({"question_id": entry["question_id"], "question_type": entry["question_type"],
+                              "variant": variant, "gold": gold, "ranked": ranked,
+                              "query_ms": round(seen.get("ms", 0.0), 1)})
         reset_store()  # drop this vault's LanceDB handle before the next
-    return rows
+    return rows, retrieval, cost
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -164,7 +242,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--budgets", default="1000,2000,4000")
     p.add_argument("--variants", default=",".join(VARIANTS))
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--shard", default=None, help="run only shard I of N, as I/N (0-based), for CI fan-out")
+    p.add_argument("--merge", nargs="+", type=Path, default=None, help="merge shard JSON files and summarize")
     args = p.parse_args(argv)
+    if args.merge:
+        return merge(args.merge)
 
     if not args.data.exists():
         print(f"No data at {args.data}. Run `make eval-data` first.", file=sys.stderr)
@@ -183,11 +265,21 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     questions = sample(json.loads(args.data.read_text()), args.per_type, args.seed)
+    if args.shard:
+        i, n = (int(x) for x in args.shard.split("/"))
+        if not 0 <= i < n:
+            print(f"Bad --shard {args.shard}: need 0 <= I < N", file=sys.stderr)
+            return 2
+        questions = questions[i::n]
+        stem = stem.with_name(f"{stem.name}-shard{i}of{n}")
     start = time.monotonic()
-    rows = []
+    rows, retrieval, costs = [], [], []
     for i, entry in enumerate(questions, 1):
         logger.info("question %d/%d %s", i, len(questions), entry["question_id"])
-        rows += run_question(entry, budgets, variants)
+        r, ret, cost = run_question(entry, budgets, variants)
+        rows += r
+        retrieval += ret
+        costs.append(cost)
 
     from alaya.index.models import get_active_model
     meta = {
@@ -196,12 +288,34 @@ def main(argv: list[str] | None = None) -> int:
         "variants": list(variants), "embedder": get_active_model().key,
         "minutes": round((time.monotonic() - start) / 60, 1),
     }
-    summary = summarize(rows)
-    Path(f"{stem}.json").write_text(json.dumps({"meta": meta, "summary": summary, "rows": rows}, indent=1))
+    summary = summarize(rows, retrieval, costs)
+    Path(f"{stem}.json").write_text(json.dumps(
+        {"meta": meta, "summary": summary, "rows": rows, "retrieval": retrieval, "questions": costs}, indent=1))
     text = markdown(summary, meta)
     Path(f"{stem}.md").write_text(text)
     print(text)
     print(f"Results: {stem}.json, log: {stem}.log")
+    return 0
+
+
+def merge(paths: list[Path]) -> int:
+    """Combine shard outputs into one summary (same files as a single run, minus the log)."""
+    parts = [json.loads(p.read_text()) for p in paths]
+    rows = [r for d in parts for r in d["rows"]]
+    retrieval = [r for d in parts for r in d.get("retrieval", [])]
+    costs = [q for d in parts for q in d.get("questions", [])]
+    first = parts[0]["meta"]
+    meta = {**first, "questions": len(costs) or sum(d["meta"]["questions"] for d in parts),
+            "shards": len(parts), "minutes": max(d["meta"]["minutes"] for d in parts)}
+    summary = summarize(rows, retrieval, costs)
+    stem = RESULTS / f"{meta['date']}-{meta['git_sha']}"
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    Path(f"{stem}.json").write_text(json.dumps(
+        {"meta": meta, "summary": summary, "rows": rows, "retrieval": retrieval, "questions": costs}, indent=1))
+    text = markdown(summary, meta)
+    Path(f"{stem}.md").write_text(text)
+    print(text)
+    print(f"Results: {stem}.json")
     return 0
 
 
