@@ -12,8 +12,10 @@ _MIN_TOP_SCORE = 0.3
 # Minimum number of results above threshold to skip correction
 _MIN_GOOD_RESULTS = 1
 
-# Score threshold for a result to be considered relevant
-_RELEVANCE_THRESHOLD = 0.2
+# Score threshold for a result to be considered relevant. 0.0 drops only negative
+# scores: hybrid scores run low, and 0.2 dropped gold hits before the limit or token
+# budget could trim (#190: LongMemEval recall_all 0.681 -> 0.874 at 4000 tokens).
+_RELEVANCE_THRESHOLD = 0.0
 
 
 def needs_correction(results: list[dict], min_score: float = _MIN_TOP_SCORE) -> bool:

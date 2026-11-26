@@ -362,3 +362,20 @@ class TestIndexFormat:
         store = VaultStore(db)
         store._get_table()
         assert store.take_needs_reindex() is False
+
+
+class TestCrossEncoderRerank:
+    def test_logits_become_probabilities_in_order(self, monkeypatch):
+        # #190: raw negative logits fell under the corrective cutoff and emptied results.
+        from alaya.index import store
+
+        class FakeModel:
+            def predict(self, pairs):
+                return [-3.0, 2.0, -8.0]
+
+        monkeypatch.setattr(store, "_get_cross_encoder", lambda: FakeModel())
+        results = [{"text": "a"}, {"text": "b"}, {"text": "c"}]
+        out = store._cross_encoder_rerank("q", results, limit=2)
+        assert [r["text"] for r in out] == ["b", "a"]
+        assert all(0.0 < r["score"] < 1.0 for r in out)
+        assert out[0]["score"] == 0.881  # sigmoid(2.0)
