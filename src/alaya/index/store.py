@@ -485,7 +485,9 @@ def _cross_encoder_rerank(query: str, results: list[dict], limit: int) -> list[d
     try:
         model = _get_cross_encoder()
         pairs = [[query, r["text"]] for r in results]
-        scores = model.predict(pairs)
+        # ms-marco returns raw logits (mostly negative); sigmoid puts them in 0..1 so the
+        # corrective cutoffs apply (#190: raw logits emptied 209 of 470 eval queries).
+        scores = 1 / (1 + np.exp(-np.asarray(model.predict(pairs), dtype=float)))
         for r, score in zip(results, scores):
             r["score"] = round(float(score), 3)
         results.sort(key=lambda r: r["score"], reverse=True)

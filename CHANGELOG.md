@@ -9,6 +9,10 @@ the major version is 0, a minor bump may break compatibility.
 
 - Chunking splits any paragraph over 2048 tokens (by line, then by width), so one huge paragraph
   no longer becomes a single chunk that takes 17 GB+ to embed. (#211)
+- Search no longer drops results scoring under 0.2. Hybrid scores run low, so gold hits were cut
+  before the limit or token budget applied. LongMemEval recall_all at 4000 tokens: 0.681 → 0.874. (#190)
+- `rerank=True` maps cross-encoder logits to 0..1. Raw, mostly negative logits were being filtered
+  out, which left about 45% of queries with no results. (#190)
 
 ## 0.3.0 — 2026-11-25
 

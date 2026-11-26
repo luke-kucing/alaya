@@ -31,9 +31,14 @@ class TestFilterRelevant:
             {"score": 0.1, "path": "b.md"},
             {"score": 0.5, "path": "c.md"},
         ]
-        filtered = filter_relevant(results)
+        filtered = filter_relevant(results, threshold=0.2)
         assert len(filtered) == 2
         assert all(r["score"] >= 0.2 for r in filtered)
+
+    def test_default_keeps_low_positive_scores(self):
+        # #190: low hybrid scores are still candidates; only negatives are dropped.
+        results = [{"score": 0.05}, {"score": 0.0}, {"score": -0.1}]
+        assert filter_relevant(results) == [{"score": 0.05}, {"score": 0.0}]
 
     def test_keeps_all_above_threshold(self):
         results = [{"score": 0.5}, {"score": 0.3}]
