@@ -48,7 +48,7 @@ jobs:
           [[ "$VARIANTS" =~ ^[a-z0-9,-]+$ ]] || { echo "bad variants"; exit 1; }
           [[ "$BUDGETS" =~ ^[0-9,]+$ ]] || { echo "bad budgets"; exit 1; }
           echo "total=$SHARDS" >> "$GITHUB_OUTPUT"
-          echo "shards=[$(seq -s, 0 $((SHARDS - 1)))]" >> "$GITHUB_OUTPUT"
+          echo "shards=$(jq -nc --argjson n "$SHARDS" '[range($n)]')" >> "$GITHUB_OUTPUT"
 
   shard:
     name: Shard ${{ matrix.shard }}
