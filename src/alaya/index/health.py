@@ -112,7 +112,8 @@ def report(vault: Path, store) -> str:
 
     cfg = get_active_model()
     indexed_with = get_index_model(store)
-    lines.append(f"Embedder: fastembed {cfg.key} ({cfg.name}, {cfg.dimensions} dims)")
+    where = f" at {cfg.url}" if cfg.url else ""
+    lines.append(f"Embedder: {cfg.backend}{where} {cfg.key} ({cfg.name}, {cfg.dimensions} dims)")
     if indexed_with and indexed_with != cfg.key:
         lines.append(f"Index built with: {indexed_with} (differs from the active embedder)")
     lines.append("Store: LanceDB")

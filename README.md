@@ -513,6 +513,12 @@ External issue CRUD (list, close, update) is handled by Claude Code natively via
 - **Prefixes:** `search_query:` for queries, `search_document:` for chunks
 - **Quantized variant:** `nomic-v1.5-q4` available via `ALAYA_EMBEDDING_MODEL` env var
 - **Hot-swap:** Changing the model triggers automatic background re-embedding
+- **Remote endpoint:** set `ALAYA_EMBEDDING_URL` to an OpenAI-compatible base URL (oMLX, vLLM, Ollama,
+  OpenAI) to embed there instead of on local CPU. `ALAYA_EMBEDDING_MODEL` still picks the registry
+  entry for prefixes and dims, and `ALAYA_EMBEDDING_REMOTE_MODEL` names the served model (default: the
+  entry's HuggingFace name). The endpoint is probed once at startup. If it's unreachable or returns the
+  wrong dims, alaya logs a warning and stays on local ONNX. Switching to or from the endpoint re-embeds
+  in the background. Requests retry with backoff on network errors, 429 and 5xx.
 
 ### Write-through indexing
 
@@ -575,6 +581,9 @@ Directory names are configurable via `alaya.toml` (see Configuration below). Not
 | `ALAYA_VAULT_DIR` | Yes | Path to your vault (e.g. `~/notes`) |
 | `ZK_NOTEBOOK_DIR` | Compat | Backward-compatible alias for `ALAYA_VAULT_DIR` |
 | `ALAYA_EMBEDDING_MODEL` | No | Embedding model variant (`nomic-v1.5` or `nomic-v1.5-q4`, default: `nomic-v1.5`) |
+| `ALAYA_EMBEDDING_URL` | No | OpenAI-compatible embeddings base URL, e.g. `http://mac.local:8000/v1` |
+| `ALAYA_EMBEDDING_REMOTE_MODEL` | No | Model id served at `ALAYA_EMBEDDING_URL` (default: the registry entry's HuggingFace name) |
+| `ALAYA_EMBEDDING_API_KEY` | No | Bearer token for `ALAYA_EMBEDDING_URL`, if it needs one |
 | `ALAYA_HTTP_TOKEN` | No | Bearer token required by `--http` clients. Set it whenever the server binds beyond loopback |
 | `ALAYA_TOOL_PROFILE` | No | Limit which tools are exposed (`librarian`, `orchestrator`, `readonly`, or a profile from `alaya.toml`; default: `librarian`) |
 | `ALAYA_CONFIRM_MODE` | No | Server-side confirmation for destructive tools: `required` (default), `optional`, `off` |
