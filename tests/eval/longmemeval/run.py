@@ -41,8 +41,13 @@ RESULTS = HERE.parent / "results"
 logger = logging.getLogger("longmemeval")
 # Pipeline stages memory_recall can toggle; each is keyless (template HyDE,
 # local cross-encoder). memory_recall has no graph expansion to toggle.
-# "threshold" overrides corrective.filter_relevant's cutoff (#190: the 0.2 default drops gold hits).
-VARIANTS = {"base": {}, "hyde": {"hyde": True}, "rerank": {"rerank": True}, "base-t0": {"threshold": 0.0}}
+# "threshold" overrides corrective.filter_relevant's cutoff (#190).
+# "baseline" swaps alaya's pipeline for a standard retriever over the same index, same
+# candidate count (20 notes) and same budget packing: plain BM25, or plain cosine on the
+# same embedder. They are the "standard RAG" reference points.
+VARIANTS = {"base": {}, "hyde": {"hyde": True}, "rerank": {"rerank": True},
+            "bm25": {"baseline": "bm25"}, "dense": {"baseline": "dense"}}
+_BASELINE_NOTES = 20  # get_memory_context's candidate limit (max(20, k))
 
 _RECALLED_RE = re.compile(r"`sessions/([^`]+)\.md`")
 
@@ -157,6 +162,16 @@ def markdown(summary: dict, meta: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def baseline_context(kind: str, query: str, vault: Path, **_ignored) -> list[dict]:
+    """Ranked hits from a standard retriever, one chunk per note, in get_memory_context's shape."""
+    from alaya.index.embedder import embed_query
+    from alaya.index.store import _vector_search, get_store, keyword_search
+    store = get_store(vault)
+    if kind == "bm25":
+        return keyword_search(query, store, limit=_BASELINE_NOTES)
+    return _vector_search(embed_query(query), store, None, _BASELINE_NOTES * 4, _BASELINE_NOTES)
+
+
 def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> tuple[list[dict], list[dict], dict]:
     """Rows per (variant, budget), ranked retrieval per variant, and per-question cost."""
     from alaya.index import corrective as corrective_mod
@@ -186,9 +201,11 @@ def run_question(entry: dict, budgets: list[int], variants: dict[str, dict]) -> 
         for variant, opts in variants.items():
             opts = dict(opts)
             threshold = opts.pop("threshold", None)
+            baseline = opts.pop("baseline", None)
             filt = relevant if threshold is None else partial(relevant, threshold=threshold)
+            fetch = memory.get_memory_context if baseline is None else partial(baseline_context, baseline)
             # Budgets only change how the same hits are trimmed: search once per variant.
-            cached = lru_cache(maxsize=None)(memory.get_memory_context)
+            cached = lru_cache(maxsize=None)(fetch)
             seen: dict = {}
 
             def fetch_once(*a, cached=cached, seen=seen, **kw):
@@ -225,7 +242,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--budgets", default="1000,2000,4000")
     p.add_argument("--variants", default=",".join(VARIANTS))
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--shard", default=None, help="run only shard I of N, as I/N (0-based), for CI fan-out")
+    p.add_argument("--merge", nargs="+", type=Path, default=None, help="merge shard JSON files and summarize")
     args = p.parse_args(argv)
+    if args.merge:
+        return merge(args.merge)
 
     if not args.data.exists():
         print(f"No data at {args.data}. Run `make eval-data` first.", file=sys.stderr)
@@ -244,6 +265,13 @@ def main(argv: list[str] | None = None) -> int:
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     questions = sample(json.loads(args.data.read_text()), args.per_type, args.seed)
+    if args.shard:
+        i, n = (int(x) for x in args.shard.split("/"))
+        if not 0 <= i < n:
+            print(f"Bad --shard {args.shard}: need 0 <= I < N", file=sys.stderr)
+            return 2
+        questions = questions[i::n]
+        stem = stem.with_name(f"{stem.name}-shard{i}of{n}")
     start = time.monotonic()
     rows, retrieval, costs = [], [], []
     for i, entry in enumerate(questions, 1):
@@ -267,6 +295,27 @@ def main(argv: list[str] | None = None) -> int:
     Path(f"{stem}.md").write_text(text)
     print(text)
     print(f"Results: {stem}.json, log: {stem}.log")
+    return 0
+
+
+def merge(paths: list[Path]) -> int:
+    """Combine shard outputs into one summary (same files as a single run, minus the log)."""
+    parts = [json.loads(p.read_text()) for p in paths]
+    rows = [r for d in parts for r in d["rows"]]
+    retrieval = [r for d in parts for r in d.get("retrieval", [])]
+    costs = [q for d in parts for q in d.get("questions", [])]
+    first = parts[0]["meta"]
+    meta = {**first, "questions": len(costs) or sum(d["meta"]["questions"] for d in parts),
+            "shards": len(parts), "minutes": max(d["meta"]["minutes"] for d in parts)}
+    summary = summarize(rows, retrieval, costs)
+    stem = RESULTS / f"{meta['date']}-{meta['git_sha']}"
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    Path(f"{stem}.json").write_text(json.dumps(
+        {"meta": meta, "summary": summary, "rows": rows, "retrieval": retrieval, "questions": costs}, indent=1))
+    text = markdown(summary, meta)
+    Path(f"{stem}.md").write_text(text)
+    print(text)
+    print(f"Results: {stem}.json")
     return 0
 
 

@@ -60,3 +60,24 @@ def test_summarize_ranked_recall_and_cost() -> None:
     assert (r["recall_any@5"], r["recall_all@5"], r["recall_any@10"], r["recall_all@10"]) == (0.5, 0.5, 1.0, 1.0)
     assert r["median_query_ms"] == 20.0
     assert s["cost"] == {"mean_haystack_tokens": 2000, "mean_index_seconds": 3.0, "mean_chunks": 20}
+
+
+def test_merge_combines_shards(tmp_path, monkeypatch) -> None:
+    import json
+
+    from tests.eval.longmemeval import run
+    monkeypatch.setattr(run, "RESULTS", tmp_path)
+    meta = {"date": "2026-11-26", "git_sha": "abc", "per_type": None, "seed": 0, "embedder": "e",
+            "budgets": [1000], "variants": ["base"]}
+    for i, (ok, ms) in enumerate([(True, 10.0), (False, 30.0)]):
+        row = {"question_id": f"q{i}", "question_type": "t", "variant": "base", "budget": 1000,
+               "recall_any": ok, "recall_all": ok, "returned": 1, "context_tokens": 100}
+        ret = {"question_id": f"q{i}", "variant": "base", "gold": ["g"], "ranked": ["g"] if ok else ["x"], "query_ms": ms}
+        q = {"question_id": f"q{i}", "haystack_tokens": 1000, "index_seconds": 1.0, "chunks": 5}
+        (tmp_path / f"s{i}.json").write_text(json.dumps(
+            {"meta": {**meta, "questions": 1, "minutes": 1.0 + i}, "rows": [row], "retrieval": [ret], "questions": [q]}))
+    assert run.merge([tmp_path / "s0.json", tmp_path / "s1.json"]) == 0
+    out = json.loads((tmp_path / "2026-11-26-abc.json").read_text())
+    assert out["meta"]["questions"] == 2 and out["meta"]["shards"] == 2 and out["meta"]["minutes"] == 2.0
+    assert out["summary"]["rows"][0]["recall_any"] == 0.5
+    assert out["summary"]["ranked"][0]["recall_any@5"] == 0.5
