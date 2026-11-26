@@ -3,6 +3,13 @@
 All notable changes to `alaya-mcp`. Versions follow [semantic versioning](https://semver.org/); while
 the major version is 0, a minor bump may break compatibility.
 
+## Unreleased
+
+### Added
+
+- `append_todo(path, task, section="Tasks")` adds a `- [ ]` task to the end of a note's section list,
+  creating the section if missing and stripping accidental checkbox prefixes. (#148)
+
 ## 0.3.1 — 2026-11-26
 
 ### Fixed

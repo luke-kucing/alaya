@@ -22,7 +22,7 @@ EXPECTED = {
     # agent memory
     "memory_recall", "memory_checkpoint", "memory_resume", "memory_supersede", "memory_stale",
     # tasks
-    "get_todos", "complete_todo",
+    "get_todos", "append_todo", "complete_todo",
     "create_task", "ready_tasks", "claim_task", "renew_task", "release_task",
     # edit & structure
     "move_note", "rename_note", "delete_note", "replace_section", "extract_section",
