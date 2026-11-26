@@ -76,7 +76,7 @@ class TestDailyNoteCreation:
 
 class TestTopicMatch:
     @patch("alaya.tools.search._hybrid_search_available", return_value=True)
-    @patch("alaya.tools.search._run_hybrid_search")
+    @patch("alaya.tools.search._run_similarity_search")
     def test_appends_on_high_score(self, mock_search, mock_avail, vault: Path) -> None:
         mock_search.return_value = [
             {"path": "projects/kubernetes-migration.md", "title": "kubernetes migration", "score": 0.70}
@@ -88,7 +88,7 @@ class TestTopicMatch:
         assert "kubernetes cluster needs more nodes" in content
 
     @patch("alaya.tools.search._hybrid_search_available", return_value=True)
-    @patch("alaya.tools.search._run_hybrid_search")
+    @patch("alaya.tools.search._run_similarity_search")
     def test_skips_below_threshold(self, mock_search, mock_avail, vault: Path) -> None:
         mock_search.return_value = [
             {"path": "resources/kubernetes-notes.md", "title": "kubernetes notes", "score": 0.40}
@@ -168,7 +168,7 @@ class TestGracefulFailures:
 
     def test_search_error_returns_none(self, vault: Path) -> None:
         with patch("alaya.tools.search._hybrid_search_available", return_value=True):
-            with patch("alaya.tools.search._run_hybrid_search", side_effect=Exception("search failed")):
+            with patch("alaya.tools.search._run_similarity_search", side_effect=Exception("search failed")):
                 result = _find_matching_note("test query", vault)
         assert result is None
 

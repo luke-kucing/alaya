@@ -1,4 +1,4 @@
-"""Corrective RAG: evaluate retrieval quality and retry with reformulated queries."""
+"""Corrective RAG helpers: relevance filtering and heuristic query reformulation."""
 from __future__ import annotations
 
 import logging
@@ -6,24 +6,10 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Minimum score for the top result to be considered "good enough"
-_MIN_TOP_SCORE = 0.3
-
-# Minimum number of results above threshold to skip correction
-_MIN_GOOD_RESULTS = 1
-
 # Score threshold for a result to be considered relevant. 0.0 drops only negative
 # scores: hybrid scores run low, and 0.2 dropped gold hits before the limit or token
 # budget could trim (#190: LongMemEval recall_all 0.681 -> 0.874 at 4000 tokens).
 _RELEVANCE_THRESHOLD = 0.0
-
-
-def needs_correction(results: list[dict], min_score: float = _MIN_TOP_SCORE) -> bool:
-    """Return True if retrieval results are too low quality and should be retried."""
-    if not results:
-        return True
-    top_score = results[0].get("score", 0.0)
-    return top_score < min_score
 
 
 def filter_relevant(results: list[dict], threshold: float = _RELEVANCE_THRESHOLD) -> list[dict]:

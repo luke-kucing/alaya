@@ -21,12 +21,12 @@ def _check_duplicates(title: str, body: str, vault: Path, threshold: float = _DE
     """
     try:
         from alaya.index.embedder import embed_query
-        from alaya.index.store import get_store, hybrid_search
+        from alaya.index.store import get_store, vector_search
 
         text = f"{title}. {body[:200]}"
         embedding = embed_query(text)
         store = get_store(vault)
-        results = hybrid_search(text, embedding, store, limit=5)
+        results = vector_search(embedding, store, limit=5)
         return [r for r in results if r["score"] >= threshold]
     except Exception:
         return []

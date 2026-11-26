@@ -418,7 +418,8 @@ def _hybrid_search_native(
 
     table = store._get_table()
     q = (
-        table.search(query, query_type="hybrid", vector_column_name="vector")
+        # query text goes through .text(): lancedb rejects it in search() alongside .vector()/.text()
+        table.search(query_type="hybrid", vector_column_name="vector")
         .vector(query_embedding.tolist())
         .text(query)
         .rerank(RRFReranker())
@@ -443,6 +444,14 @@ def _vector_search(
         q = q.where(where)
     results = q.to_list()
     return _dedup_by_path_vector(results, limit)
+
+
+def vector_search(query_embedding: np.ndarray, store: VaultStore, limit: int = 10) -> list[dict]:
+    """Nearest notes by embedding alone. Scores are similarities (1 - distance), so callers
+    can threshold them; hybrid scores are RRF ranks and can't be."""
+    if store.count() == 0:
+        return []
+    return _vector_search(query_embedding, store, None, limit * 4, limit)
 
 
 def keyword_search(

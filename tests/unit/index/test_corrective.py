@@ -1,27 +1,8 @@
 """Tests for corrective RAG: quality check and query reformulation."""
-from alaya.index.corrective import needs_correction, filter_relevant, reformulate_query
+from pathlib import Path
+from unittest.mock import patch
 
-
-class TestNeedsCorrection:
-    def test_empty_results_need_correction(self):
-        assert needs_correction([]) is True
-
-    def test_low_score_needs_correction(self):
-        results = [{"score": 0.1, "path": "a.md"}]
-        assert needs_correction(results) is True
-
-    def test_high_score_does_not_need_correction(self):
-        results = [{"score": 0.8, "path": "a.md"}]
-        assert needs_correction(results) is False
-
-    def test_threshold_boundary(self):
-        assert needs_correction([{"score": 0.3}]) is False
-        assert needs_correction([{"score": 0.29}]) is True
-
-    def test_custom_threshold(self):
-        results = [{"score": 0.5}]
-        assert needs_correction(results, min_score=0.6) is True
-        assert needs_correction(results, min_score=0.4) is False
+from alaya.index.corrective import filter_relevant, reformulate_query
 
 
 class TestFilterRelevant:
@@ -72,3 +53,43 @@ class TestReformulateQuery:
     def test_long_query_produces_shortened_version(self):
         alts = reformulate_query("what are the best practices for kubernetes deployment in production environments")
         assert any(len(a.split()) <= 4 for a in alts)
+
+
+class TestCorrectiveSearch:
+    """Reformulations only run when the original query finds nothing (LongMemEval: they
+    used to replace good results, e.g. "airline ... March and April?" -> "March and April?")."""
+
+    def _run(self, by_query):
+        from alaya.tools.search import _run_corrective_search
+        with patch("alaya.tools.search._run_routed_search", side_effect=lambda q, *a, **k: by_query.get(q, [])) as m:
+            return _run_corrective_search("Which airline did I fly with the most in March and April?", Path(".")), m
+
+    def test_keeps_non_empty_results_even_with_low_scores(self):
+        hit = [{"path": "flights.md", "score": 0.02}]
+        out, m = self._run({"Which airline did I fly with the most in March and April?": hit,
+                            "March and April?": [{"path": "calendar.md", "score": 0.9}]})
+        assert out == hit and m.call_count == 1
+
+    def test_retries_reformulations_when_empty(self):
+        hit = [{"path": "flights.md", "score": 0.1}]
+        out, _ = self._run({"airline did I fly with the most in March and April": hit})
+        assert out == hit
+
+
+class TestTemporalFallback:
+    def test_empty_inferred_window_falls_back_to_unfiltered(self):
+        from alaya.tools.search import _run_routed_search
+        hit = [{"path": "old.md", "score": 0.5}]
+        with patch("alaya.index.store.get_store"), \
+             patch("alaya.index.embedder.embed_query"), \
+             patch("alaya.index.store.hybrid_search", side_effect=lambda *a, since=None, **k: [] if since else hit) as m:
+            assert _run_routed_search("What certification did I complete last month?", Path(".")) == hit
+        assert [c.kwargs["since"] for c in m.call_args_list][-1] is None and m.call_args_list[0].kwargs["since"]
+
+    def test_explicit_since_is_respected(self):
+        from alaya.tools.search import _run_routed_search
+        with patch("alaya.index.store.get_store"), \
+             patch("alaya.index.embedder.embed_query"), \
+             patch("alaya.index.store.hybrid_search", return_value=[]) as m:
+            assert _run_routed_search("What did I complete last month?", Path("."), since="2026-01-01") == []
+        assert m.call_count == 1

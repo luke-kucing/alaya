@@ -75,11 +75,19 @@ def _run_routed_search(
     else:
         query_embedding = embed_query(routed.query)
 
-    return hybrid_search(
-        routed.query, query_embedding, store,
-        directory=directory, tags=tags, since=effective_since, limit=limit, rerank=rerank,
-        include_types=include_types, exclude_types=exclude_types,
-    )
+    def run(window: str | None) -> list[dict]:
+        return hybrid_search(
+            routed.query, query_embedding, store,
+            directory=directory, tags=tags, since=window, limit=limit, rerank=rerank,
+            include_types=include_types, exclude_types=exclude_types,
+        )
+
+    results = run(effective_since)
+    if not results and routed.since and not since:
+        # The inferred window ("last month") is relative to today; an empty window
+        # shouldn't mean no answer when the notes are just older.
+        results = run(None)
+    return results
 
 
 def _run_corrective_search(
@@ -94,61 +102,37 @@ def _run_corrective_search(
     include_types: list[str] | None = None,
     exclude_types: list[str] | None = None,
 ) -> list[dict]:
-    """Search with corrective RAG: retry with reformulated queries if results are poor."""
-    from alaya.index.corrective import needs_correction, filter_relevant, reformulate_query
+    """Routed search, retried with reformulated queries only when it finds nothing.
 
-    results = _run_routed_search(
+    A reformulation never replaces non-empty results: scores from different queries
+    aren't comparable, and the reformulations drop words ("March and April?").
+    """
+    from alaya.index.corrective import filter_relevant, reformulate_query
+
+    results = filter_relevant(_run_routed_search(
         query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
         include_types=include_types, exclude_types=exclude_types,
-    )
-
-    # Filter out irrelevant results
-    results = filter_relevant(results)
-
-    # If results are good enough, return them
-    if not needs_correction(results):
+    ))
+    if results:
         return results
-
-    # Try reformulated queries
     for alt_query in reformulate_query(query):
         logger.debug("Corrective RAG retry with: %r", alt_query)
-        alt_results = _run_routed_search(
+        alt_results = filter_relevant(_run_routed_search(
             alt_query, vault, directory=directory, tags=tags, since=since, limit=limit, rerank=rerank, hyde=hyde,
             include_types=include_types, exclude_types=exclude_types,
-        )
-        alt_results = filter_relevant(alt_results)
-        if not needs_correction(alt_results):
+        ))
+        if alt_results:
             return alt_results
-        # Merge: keep the best results seen so far
-        if alt_results and (not results or alt_results[0]["score"] > results[0]["score"]):
-            results = alt_results
-
     return results
 
 
-def _run_hybrid_search(
-    query: str,
-    vault: Path,
-    directory: str | None = None,
-    tags: list[str] | None = None,
-    since: str | None = None,
-    limit: int = 20,
-    rerank: bool = False,
-) -> list[dict]:
-    """Embed the query and run hybrid search against LanceDB.
-
-    This is the non-routed path, used by callers that bypass routing
-    (e.g., smart_capture's _find_matching_note).
-    """
+def _run_similarity_search(query: str, vault: Path, limit: int = 20) -> list[dict]:
+    """Nearest notes by embedding, with similarity scores a caller can threshold
+    (smart_capture's _find_matching_note). Hybrid scores are RRF ranks and can't be."""
     from alaya.index.embedder import embed_query
-    from alaya.index.store import get_store, hybrid_search
+    from alaya.index.store import get_store, vector_search
 
-    query_embedding = embed_query(query)
-    store = get_store(vault)
-    return hybrid_search(
-        query, query_embedding, store,
-        directory=directory, tags=tags, since=since, limit=limit, rerank=rerank,
-    )
+    return vector_search(embed_query(query), get_store(vault), limit=limit)
 
 
 SNIPPET_CHARS = 240

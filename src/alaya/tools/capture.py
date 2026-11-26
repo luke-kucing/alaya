@@ -89,11 +89,11 @@ def _detect_daily(text: str) -> bool:
 def _find_matching_note(text: str, vault: Path) -> dict | None:
     """Find a semantically similar note above threshold, or None."""
     try:
-        from alaya.tools.search import _run_hybrid_search, _hybrid_search_available
+        from alaya.tools.search import _run_similarity_search, _hybrid_search_available
 
         if not _hybrid_search_available(vault):
             return None
-        results = _run_hybrid_search(text, vault, limit=3)
+        results = _run_similarity_search(text, vault, limit=3)
         if results and results[0]["score"] >= _MATCH_THRESHOLD:
             return results[0]
     except Exception:
