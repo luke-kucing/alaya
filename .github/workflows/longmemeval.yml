@@ -18,6 +18,9 @@ on:
       budgets:
         description: "Token budgets"
         default: "1000,2000,4000"
+      embedding_model:
+        description: "Embedder key from alaya.index.models (nomic-v1.5, nomic-v1.5-q4, jina-v3)"
+        default: "nomic-v1.5"
 
 # Least privilege: nothing here writes to the repo.
 permissions:
@@ -42,7 +45,9 @@ jobs:
           PER_TYPE: ${{ inputs.per_type }}
           VARIANTS: ${{ inputs.variants }}
           BUDGETS: ${{ inputs.budgets }}
+          EMBEDDING_MODEL: ${{ inputs.embedding_model }}
         run: |
+          [[ "$EMBEDDING_MODEL" =~ ^[a-z0-9.-]+$ ]] || { echo "bad embedding_model"; exit 1; }
           [[ "$SHARDS" =~ ^([1-9]|1[0-9]|20)$ ]] || { echo "shards must be 1-20"; exit 1; }
           [[ -z "$PER_TYPE" || "$PER_TYPE" =~ ^[0-9]+$ ]] || { echo "per_type must be a number"; exit 1; }
           [[ "$VARIANTS" =~ ^[a-z0-9,-]+$ ]] || { echo "bad variants"; exit 1; }
@@ -84,6 +89,7 @@ jobs:
           PER_TYPE: ${{ inputs.per_type }}
           VARIANTS: ${{ inputs.variants }}
           BUDGETS: ${{ inputs.budgets }}
+          ALAYA_EMBEDDING_MODEL: ${{ inputs.embedding_model }}
         run: |
           uv run --no-sync python -m tests.eval.longmemeval.run --shard "$SHARD" \
             --variants "$VARIANTS" --budgets "$BUDGETS" ${PER_TYPE:+--per-type "$PER_TYPE"} > shard.out
