@@ -44,5 +44,19 @@ def test_summarize_groups_overall_and_by_type() -> None:
     ]
     s = summarize(rows)["rows"]
     assert s[0] == {"variant": "base", "budget": 1000, "question_type": "all", "n": 2,
-                    "recall_any": 0.5, "recall_all": 0.0, "avg_returned": 3.0}
+                    "recall_any": 0.5, "recall_all": 0.0, "avg_returned": 3.0, "avg_context_tokens": 0}
     assert [r["question_type"] for r in s] == ["all", "t", "u"]
+
+
+def test_summarize_ranked_recall_and_cost() -> None:
+    retrieval = [
+        {"variant": "base", "gold": ["g"], "ranked": ["x", "x2", "x3", "x4", "x5", "g"], "query_ms": 10.0},
+        {"variant": "base", "gold": ["g", "h"], "ranked": ["g", "h"], "query_ms": 30.0},
+    ]
+    questions = [{"haystack_tokens": 1000, "index_seconds": 2.0, "chunks": 10},
+                 {"haystack_tokens": 3000, "index_seconds": 4.0, "chunks": 30}]
+    s = summarize([], retrieval, questions)
+    r = s["ranked"][0]
+    assert (r["recall_any@5"], r["recall_all@5"], r["recall_any@10"], r["recall_all@10"]) == (0.5, 0.5, 1.0, 1.0)
+    assert r["median_query_ms"] == 20.0
+    assert s["cost"] == {"mean_haystack_tokens": 2000, "mean_index_seconds": 3.0, "mean_chunks": 20}
